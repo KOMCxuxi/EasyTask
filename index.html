@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Pixel Notes · 像素笔记</title>
+  <meta name="description" content="离线优先的像素风备忘录：记事 · 待办 · 日历，资料只存在本机。">
+  <meta name="theme-color" content="#f2eee2">
+  <meta name="color-scheme" content="light">
+
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/icon-180.png">
+  <link rel="stylesheet" href="./styles.css">
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Pixel Notes">
+
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="topbar">
+      <a class="brand" href="#/tasks" aria-label="Pixel Notes 首页">
+        <img class="brand-mark" src="./icons/mark.svg" width="22" height="22" alt="">
+        <span class="brand-text">PIXEL<em>NOTES</em></span>
+      </a>
+
+      <nav class="tabs" id="tabs" aria-label="主选单">
+        <a href="#/tasks" data-tab="tasks">待办</a>
+        <a href="#/calendar" data-tab="calendar">日历</a>
+        <a href="#/notes" data-tab="notes">备忘</a>
+      </nav>
+
+      <button class="icon-btn" id="btn-settings" type="button" data-act="open-settings" aria-label="设置" title="设置">⚙</button>
+    </header>
+
+    <main class="view" id="view" tabindex="-1">
+      <noscript>
+        <div class="page"><p class="hint">这个 App 需要 JavaScript。请在 Safari 设定里开启 JavaScript 后再打开。</p></div>
+      </noscript>
+    </main>
+
+    <button class="fab" id="fab" type="button" data-act="fab" aria-label="新增">+</button>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
+</body>
+</html>
