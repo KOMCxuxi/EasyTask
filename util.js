@@ -149,6 +149,34 @@ export function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+/* ---------- 提醒 / 逾期 ---------- */
+
+/** 新任务的预设提醒（开始前几分钟） */
+export const DEFAULT_REMIND = 10;
+
+/**
+ * 取得任务实际生效的提醒分钟数：
+ *   null → 不提醒；0 → 准时；N → 开始前 N 分钟；undefined → 预设 10 分钟
+ */
+export function effectiveRemind(task) {
+  const value = task ? task.remind : undefined;
+  if (value === null) return null;
+  if (typeof value === 'number' && !Number.isNaN(value)) return Math.max(0, Math.round(value));
+  return DEFAULT_REMIND;
+}
+
+export function reminderLabel(task) {
+  const minutes = effectiveRemind(task);
+  if (minutes === null) return '不提醒';
+  if (minutes === 0) return '准时提醒';
+  return `提前 ${minutes} 分钟`;
+}
+
+/** 过期 = 未完成且结束时间已经过去 */
+export function isOverdue(task, now = Date.now()) {
+  return Boolean(task) && !task.done && Number(task.endAt) < now;
+}
+
 /** HTML 转义（用于 textContent 之外的所有插值） */
 export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({

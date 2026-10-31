@@ -2,7 +2,7 @@
 // 更新版本时请把 CACHE 改成新名字（例如 pixel-notes-v2），
 // 否则旧的快取会继续被使用。也可以在 App 的「设置 → 检查更新」手动清快取。
 
-const CACHE = 'pixel-notes-v1';
+const CACHE = 'pixel-notes-v2';
 
 const ASSETS = [
   './',
@@ -11,6 +11,8 @@ const ASSETS = [
   './app.js',
   './util.js',
   './db.js',
+  './ics.js',
+  './md.js',
   './manifest.webmanifest',
   './icons/mark.svg',
   './icons/favicon-32.png',

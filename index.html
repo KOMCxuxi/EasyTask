@@ -6,7 +6,21 @@
   <title>Pixel Notes · 像素笔记</title>
   <meta name="description" content="离线优先的像素风备忘录：记事 · 待办 · 日历，资料只存在本机。">
   <meta name="theme-color" content="#f2eee2">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
+
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('pixel-notes-theme') || 'auto';
+        var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var resolved = mode === 'dark' ? 'dark' : mode === 'light' ? 'light' : dark ? 'dark' : 'light';
+        document.documentElement.dataset.theme = resolved;
+        document.documentElement.dataset.themeMode = mode;
+      } catch (err) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
 
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
@@ -34,6 +48,8 @@
         <a href="#/calendar" data-tab="calendar">日历</a>
         <a href="#/notes" data-tab="notes">备忘</a>
       </nav>
+
+      <button class="icon-btn" id="btn-theme" type="button" data-act="cycle-theme" aria-label="切换主题" title="切换主题">◐</button>
 
       <button class="icon-btn" id="btn-settings" type="button" data-act="open-settings" aria-label="设置" title="设置">⚙</button>
     </header>
