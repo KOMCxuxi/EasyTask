@@ -2,7 +2,7 @@
 // 更新版本时请把 CACHE 改成新名字（例如 pixel-notes-v2），
 // 否则旧的快取会继续被使用。也可以在 App 的「设置 → 检查更新」手动清快取。
 
-const CACHE = 'pixel-notes-v2';
+const CACHE = 'pixel-notes-v4';
 
 const ASSETS = [
   './',
@@ -13,6 +13,7 @@ const ASSETS = [
   './db.js',
   './ics.js',
   './md.js',
+  './richtext.js',
   './manifest.webmanifest',
   './icons/mark.svg',
   './icons/favicon-32.png',
@@ -24,10 +25,12 @@ const ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(ASSETS))
-      .then(() => self.skipWaiting())
+    (async () => {
+      const cache = await caches.open(CACHE);
+      // 逐个快取：就算部署时漏了某个档案（例如 icons/），也不会让整个安装失败
+      await Promise.all(ASSETS.map((url) => cache.add(url).catch(() => {})));
+      await self.skipWaiting();
+    })()
   );
 });
 

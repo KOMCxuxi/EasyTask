@@ -73,5 +73,64 @@
 
   <div id="modal-root"></div>
   <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
+
+  <script>
+    // 如果 app.js 或它依赖的模块没载入，至少告诉使用者哪里出问题，而不是一片空白
+    (function () {
+      function showFailure(message) {
+        if (document.documentElement.dataset.appReady) return;
+        var view = document.getElementById('view');
+        if (!view) return;
+        view.textContent = '';
+        var section = document.createElement('section');
+        section.className = 'page';
+        var box = document.createElement('div');
+        box.className = 'empty';
+        var title = document.createElement('h2');
+        title.textContent = '载入失败';
+        var detail = document.createElement('p');
+        detail.textContent = message;
+        var hint = document.createElement('p');
+        hint.className = 'hint';
+        hint.textContent = '请确认所有档案都上传了（尤其是新加的模块，例如 richtext.js），并用 Safari 清除网站资料后重新开启。设置里的「部署检查」也能帮忙确认。';
+        var retry = document.createElement('button');
+        retry.className = 'btn';
+        retry.type = 'button';
+        retry.textContent = '重新载入';
+        retry.addEventListener('click', function () { location.reload(); });
+        box.appendChild(title);
+        box.appendChild(detail);
+        box.appendChild(hint);
+        box.appendChild(retry);
+        section.appendChild(box);
+        view.appendChild(section);
+      }
+
+      window.addEventListener('error', function (event) {
+        if (event && event.message) showFailure('有一个档案没有正确载入：' + event.message);
+      }, true);
+
+      document.addEventListener('DOMContentLoaded', function () {
+        // 离线时（已经从快取启动）就不做网路检查，避免误报
+        if (navigator.onLine) {
+          var cores = ['app.js', 'db.js', 'util.js', 'ics.js', 'md.js', 'richtext.js', 'styles.css'];
+          Promise.all(cores.map(function (name) {
+            return fetch('./' + name + '?preflight=' + Date.now(), { cache: 'no-store' })
+              .then(function (res) { return { name: name, ok: res.ok }; })
+              .catch(function () { return { name: name, ok: false }; });
+          })).then(function (results) {
+            var missing = results.filter(function (row) { return !row.ok; }).map(function (row) { return row.name; });
+            if (missing.length) showFailure('找不到这些档案：' + missing.join('、') + '。');
+          });
+        }
+
+        setTimeout(function () {
+          if (!document.documentElement.dataset.appReady) {
+            showFailure('App 没有正常启动（可能是版本不完整，或快取还是旧的）。');
+          }
+        }, 6000);
+      });
+    })();
+  </script>
 </body>
 </html>

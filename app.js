@@ -4,7 +4,7 @@
 import { db } from './db.js';
 import { buildICS, icsFilename } from './ics.js';
 import { renderMarkdown } from './md.js';
-import { htmlToText, isEmptyHtml, sanitizeHtml } from './richtext.js';
+import { htmlToMarkdown, htmlToText, isEmptyHtml, sanitizeHtml } from './richtext.js';
 import {
   DEFAULT_REMIND,
   addDays,
@@ -51,6 +51,20 @@ const CAT = {
   other: { label: '其他', color: '#a06cd5' },
 };
 
+const PROJECT_COLORS = [
+  { id: 'blue', label: '蓝', color: '#4d9de0' },
+  { id: 'green', label: '绿', color: '#3ddc97' },
+  { id: 'yellow', label: '黄', color: '#ffd23f' },
+  { id: 'purple', label: '紫', color: '#a06cd5' },
+  { id: 'orange', label: '橙', color: '#ff9f43' },
+];
+
+function projectColor(project) {
+  if (!project) return '#6d6857';
+  const found = PROJECT_COLORS.find((item) => item.id === project.color);
+  return found ? found.color : PROJECT_COLORS[0].color;
+}
+
 const FILTERS = [
   ['all', '全部'],
   ['undone', '未完成'],
@@ -80,6 +94,8 @@ const state = {
   tasks: [],
   notes: [],
   files: [],
+  projects: [],
+  folders: [],
   route: { name: 'tasks' },
   viewMonth: new Date(),
   selectedDay: startOfDay(Date.now()),
@@ -196,14 +212,23 @@ async function boot() {
 
   bindEvents();
   await render();
+  document.documentElement.dataset.appReady = '1';
   registerSW();
 }
 
 async function loadData() {
-  const [tasks, notes, files] = await Promise.all([db.tasksAll(), db.notesAll(), db.filesAll()]);
+  const [tasks, notes, files, projects, folders] = await Promise.all([
+    db.tasksAll(),
+    db.notesAll(),
+    db.filesAll(),
+    db.projectsAll(),
+    db.foldersAll(),
+  ]);
   state.tasks = tasks || [];
   state.notes = notes || [];
   state.files = files || [];
+  state.projects = (projects || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  state.folders = (folders || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 }
 
 /** 第一次打开时放几个示例，方便马上看到效果 */
@@ -218,34 +243,53 @@ async function seedIfNeeded() {
   };
   const now = Date.now();
 
+  const p1 = { id: uid(), name: '工作', color: 'blue', createdAt: now, updatedAt: now };
+  const p2 = { id: uid(), name: '生活', color: 'green', createdAt: now, updatedAt: now };
+  const p3 = { id: uid(), name: '学习', color: 'yellow', createdAt: now, updatedAt: now };
+
+  const f1 = { id: uid(), name: '灵感', createdAt: now, updatedAt: now };
+  const f2 = { id: uid(), name: '工作笔记', createdAt: now, updatedAt: now };
+
   const t1 = {
     id: uid(), title: '欢迎使用：点开这个任务',
     startAt: at(0, 9, 0), endAt: at(0, 10, 0),
-    cat: 'work', done: 0, createdAt: now, updatedAt: now,
+    cat: 'work', projectId: p1.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const t2 = {
     id: uid(), title: '整理这周的待办',
     startAt: at(0, 14, 0), endAt: at(0, 15, 30),
-    cat: 'life', done: 0, createdAt: now, updatedAt: now,
+    cat: 'life', projectId: p2.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const t3 = {
     id: uid(), title: '周末采购清单',
     startAt: at(1, 11, 0), endAt: at(1, 12, 0),
-    cat: 'other', done: 0, createdAt: now, updatedAt: now,
+    cat: 'other', projectId: p2.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
+  };
+  const t4 = {
+    id: uid(), title: '读 30 分钟书',
+    startAt: at(1, 20, 0), endAt: at(1, 20, 30),
+    cat: 'study', projectId: p3.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const n1 = {
-    id: uid(), taskId: t1.id, title: '这个任务里的笔记',
+    id: uid(), taskId: t1.id, folderId: null, title: '这个任务里的笔记',
     body: '每个任务都能有自己的笔记和附件。\n\n点「＋ 任务笔记」再写一则；点「＋ 附件」把照片或文件放进来。\n资料只存在这台装置，记得偶尔到设置里汇出备份。',
     pinned: 0, createdAt: now, updatedAt: now,
   };
   const n2 = {
-    id: uid(), taskId: null, title: '灵感速记',
+    id: uid(), taskId: null, folderId: f1.id, title: '灵感速记',
     body: '独立备忘录放在这里：\n- 想看的书\n- 想买的东西\n- 随手记下的一句话',
     pinned: 1, createdAt: now, updatedAt: now,
   };
+  const n3 = {
+    id: uid(), taskId: null, folderId: f2.id, title: '本周复盘',
+    body: '# 本周复盘\n\n先写下三件做得好的事，再写两件想改进的事。\n\n| 项目 | 状况 | 备注 |\n| --- | --- | --- |\n| 专案 A | 进行中 | 下周三检查 |\n| 专案 B | 已完成 | 待归档 |',
+    pinned: 0, createdAt: now, updatedAt: now,
+  };
 
-  for (const task of [t1, t2, t3]) await db.taskPut(task);
-  for (const note of [n1, n2]) await db.notePut(note);
+  for (const project of [p1, p2, p3]) await db.projectPut(project);
+  for (const folder of [f1, f2]) await db.folderPut(folder);
+  for (const task of [t1, t2, t3, t4]) await db.taskPut(task);
+  for (const note of [n1, n2, n3]) await db.notePut(note);
   await db.metaSet('seeded', true);
 }
 
@@ -258,8 +302,16 @@ function parseRoute() {
   const [pathPart, queryPart = ''] = raw.split('?');
   const parts = pathPart.split('/').filter(Boolean);
   const name = parts[0] || 'tasks';
-  if (name === 'tasks' || name === 'calendar' || name === 'notes') return { name };
+  if (name === 'tasks' || name === 'all' || name === 'calendar' || name === 'notes' || name === 'allnotes') {
+    return { name };
+  }
   if (name === 'new') return { name: 'new', params: new URLSearchParams(queryPart) };
+  if (name === 'project' && parts[1]) {
+    return { name: 'project', id: parts[1] === 'inbox' ? null : decodeURIComponent(parts[1]) };
+  }
+  if (name === 'folder' && parts[1]) {
+    return { name: 'folder', id: parts[1] === 'inbox' ? null : decodeURIComponent(parts[1]) };
+  }
   if ((name === 'task' || name === 'note') && parts[1]) {
     return { name, id: decodeURIComponent(parts[1]) };
   }
@@ -283,11 +335,33 @@ function presetFromParams(params) {
   const remind = params.get('remind');
   if (remind === 'none') preset.remind = null;
   else if (remind && /^\d+$/.test(remind)) preset.remind = Number(remind);
+  const project = params.get('project');
+  if (project) {
+    const matched = state.projects.find((p) => p.id === project || p.name === project);
+    if (matched) preset.projectId = matched.id;
+  }
   return preset;
 }
 
+function routeSection(route) {
+  if (['tasks', 'all', 'project', 'task'].includes(route.name)) return 'tasks';
+  if (['notes', 'allnotes', 'folder', 'note'].includes(route.name)) return 'notes';
+  if (route.name === 'calendar') return 'calendar';
+  return route.name;
+}
+
 function updateTabs(route) {
-  const map = { tasks: 'tasks', task: 'tasks', calendar: 'calendar', notes: 'notes', note: 'notes' };
+  const map = {
+    tasks: 'tasks',
+    all: 'tasks',
+    project: 'tasks',
+    task: 'tasks',
+    calendar: 'calendar',
+    notes: 'notes',
+    allnotes: 'notes',
+    folder: 'notes',
+    note: 'notes',
+  };
   const active = map[route.name] || 'tasks';
   document.querySelectorAll('#tabs a').forEach((a) => {
     if (a.dataset.tab === active) a.setAttribute('aria-current', 'page');
@@ -328,15 +402,25 @@ async function render(opts = {}) {
   }
 
   const viewRoute = route.name === 'new' ? { name: 'tasks' } : route;
+  const previousSection = state.route ? routeSection(state.route) : null;
+  if (previousSection && previousSection !== routeSection(viewRoute)) {
+    state.query.tasks = '';
+    state.query.notes = '';
+    state.filter = 'all';
+  }
   state.route = viewRoute;
   updateTabs(viewRoute);
   revokeUrls();
 
   let html = '';
   try {
-    if (viewRoute.name === 'tasks') html = renderTasks();
+    if (viewRoute.name === 'tasks') html = renderTaskHome();
+    else if (viewRoute.name === 'all') html = renderAllTasks();
+    else if (viewRoute.name === 'project') html = renderProjectPage(viewRoute.id);
     else if (viewRoute.name === 'calendar') html = renderCalendar();
-    else if (viewRoute.name === 'notes') html = renderNotes();
+    else if (viewRoute.name === 'notes') html = renderNotesHome();
+    else if (viewRoute.name === 'allnotes') html = renderAllNotes();
+    else if (viewRoute.name === 'folder') html = renderFolderPage(viewRoute.id);
     else if (viewRoute.name === 'task') html = await renderTaskDetail(viewRoute.id);
     else if (viewRoute.name === 'note') html = renderNoteEditor(viewRoute.id);
   } catch (err) {
@@ -349,12 +433,21 @@ async function render(opts = {}) {
 
   const fab = document.getElementById('fab');
   if (fab) {
-    const show =
-      viewRoute.name === 'tasks' || viewRoute.name === 'calendar' || viewRoute.name === 'notes';
-    fab.hidden = !show;
-    fab.dataset.act =
-      viewRoute.name === 'notes' ? 'new-note' : viewRoute.name === 'calendar' ? 'new-task-day' : 'new-task';
-    fab.setAttribute('aria-label', viewRoute.name === 'notes' ? '新增备忘录' : '新增任务');
+    const actions = {
+      tasks: ['new-project', '新增专案'],
+      all: ['new-task', '新增任务'],
+      project: ['new-task', '新增任务'],
+      calendar: ['new-task-day', '新增任务'],
+      notes: ['new-folder', '新增资料夹'],
+      allnotes: ['new-note', '新增备忘录'],
+      folder: ['new-note', '新增备忘录'],
+    };
+    const entry = actions[viewRoute.name];
+    fab.hidden = !entry;
+    if (entry) {
+      fab.dataset.act = entry[0];
+      fab.setAttribute('aria-label', entry[1]);
+    }
   }
 
   postRender(viewRoute);
@@ -426,16 +519,72 @@ function isStandalone() {
    待办清单
    ========================================================================== */
 
-function renderTasks() {
+function projectById(id) {
+  return id ? state.projects.find((p) => p.id === id) : null;
+}
+
+function tasksForProject(projectId) {
+  return state.tasks.filter((t) => (projectId ? t.projectId === projectId : !t.projectId));
+}
+
+function taskSummary(list) {
+  return `${list.length} 项 · ${list.filter((t) => !t.done).length} 项未完成`;
+}
+
+function renderTaskHome() {
+  const tasks = state.tasks;
+  const inbox = tasks.filter((t) => !t.projectId);
+  const overdue = tasks.filter((t) => isOverdue(t));
+  const cards = state.projects.map((project) => projectCardHTML(project)).join('');
+  const inboxCard = inbox.length
+    ? projectCardHTML({ id: null, name: '未分类', color: null })
+    : '';
+
   return `<section class="page">
     <div class="page-head">
       <div>
         <h1>待办</h1>
-        <p class="sub" id="task-sub">${esc(taskSummary())}</p>
+        <p class="sub">${tasks.length} 项 · ${tasks.filter((t) => !t.done).length} 项未完成</p>
       </div>
-      <button class="btn btn-primary" type="button" data-act="new-task">＋ 新任务</button>
+      <div class="head-actions">
+        <button class="btn" type="button" data-act="go-all">全部任务</button>
+        <button class="btn btn-primary" type="button" data-act="new-project">＋ 新专案</button>
+      </div>
     </div>
     ${installHintHTML()}
+    ${overdue.length
+      ? `<div class="overdue-banner"><span>有 ${overdue.length} 个逾期任务</span><button class="btn tiny btn-danger" type="button" data-act="go-all">去处理</button></div>`
+      : ''}
+    ${cards || inboxCard
+      ? `<div class="project-grid">${cards}${inboxCard}</div>`
+      : emptyState('还没有专案', '按「＋ 新专案」建立第一个专案，再把任务放进去。')}
+  </section>`;
+}
+
+function projectCardHTML(project) {
+  const list = tasksForProject(project.id);
+  const undone = list.filter((t) => !t.done).length;
+  const next = list.filter((t) => !t.done).sort((a, b) => a.startAt - b.startAt)[0];
+  const nextText = next ? `${relDayLabel(next.startAt)} ${fmtTime(next.startAt)} · ${next.title}` : '没有待办任务';
+  const color = projectColor(project);
+  return `<a class="project-card" href="#/project/${project.id || 'inbox'}" style="--c:${color}">
+    <div class="pc-head"><span class="pc-name">${esc(project.name)}</span><span class="pc-count">${undone}/${list.length}</span></div>
+    <div class="pc-next">${esc(nextText)}</div>
+  </a>`;
+}
+
+function renderAllTasks() {
+  return `<section class="page">
+    <div class="page-head">
+      <div>
+        <h1>全部任务</h1>
+        <p class="sub" id="task-sub">${esc(taskSummary(state.tasks))}</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn" type="button" data-act="go-tasks">‹ 专案</button>
+        <button class="btn btn-primary" type="button" data-act="new-task">＋ 新任务</button>
+      </div>
+    </div>
     <div class="toolbar">
       <div class="search-wrap">
         <span class="search-ico" aria-hidden="true">⌕</span>
@@ -445,12 +594,36 @@ function renderTasks() {
         ${FILTERS.map(([key, label]) => `<button class="chip ${state.filter === key ? 'on' : ''}" type="button" data-act="filter" data-filter="${key}">${label}</button>`).join('')}
       </div>
     </div>
-    <div id="task-list">${taskListHTML()}</div>
+    <div id="task-list">${taskListHTML(state.tasks, { showProject: true })}</div>
   </section>`;
 }
 
-function taskSummary() {
-  return `${state.tasks.length} 项 · ${state.tasks.filter((t) => !t.done).length} 项未完成`;
+function renderProjectPage(id) {
+  const project = id ? projectById(id) : null;
+  if (id && !project) return notFoundPage('专案不存在或已被删除', '#/tasks');
+  const name = project ? project.name : '未分类';
+  const list = tasksForProject(id);
+  const color = project ? projectColor(project) : '#6d6857';
+
+  return `<section class="page">
+    <div class="detail-top">
+      <button class="btn tiny" type="button" data-act="go-tasks">‹ 专案</button>
+      <span class="badge" style="border-color:${color}">${esc(name)}</span>
+    </div>
+    <div class="page-head">
+      <div>
+        <h1>${esc(name)}</h1>
+        <p class="sub" id="task-sub">${esc(taskSummary(list))}</p>
+      </div>
+      <div class="head-actions">
+        ${project ? `<button class="btn" type="button" data-act="edit-project" data-id="${project.id}">编辑</button>` : ''}
+        ${project ? `<button class="btn btn-danger" type="button" data-act="delete-project" data-id="${project.id}">删除</button>` : ''}
+        <button class="btn btn-primary" type="button" data-act="new-task">＋ 新任务</button>
+      </div>
+    </div>
+    ${project ? '' : '<p class="hint">未分类收纳还没有放进专案的任务；在任务编辑里可以移动。</p>'}
+    <div id="task-list">${taskListHTML(list, { showProject: false, applyQuery: false })}</div>
+  </section>`;
 }
 
 function installHintHTML() {
@@ -480,19 +653,25 @@ function buildCountMaps() {
   return { noteCount, fileCount, noteText };
 }
 
-function taskListHTML() {
-  const query = state.query.tasks.trim().toLowerCase();
+function taskListHTML(list, opts = {}) {
+  const { showProject = false, applyQuery = true } = opts;
+  const query = applyQuery ? state.query.tasks.trim().toLowerCase() : '';
   const { noteCount, fileCount, noteText } = buildCountMaps();
   const todayKey = dayKey(Date.now());
   const now = Date.now();
 
-  const filtered = state.tasks.filter((t) => {
-    if (state.filter === 'undone' && t.done) return false;
-    if (state.filter === 'done' && !t.done) return false;
-    if (state.filter === 'today' && dayKey(t.startAt) !== todayKey) return false;
-    if (query) {
-      const haystack = `${t.title} ${noteText[t.id] || ''}`.toLowerCase();
-      if (!haystack.includes(query)) return false;
+  const projectMap = {};
+  for (const project of state.projects) projectMap[project.id] = project;
+
+  const filtered = list.filter((t) => {
+    if (applyQuery) {
+      if (state.filter === 'undone' && t.done) return false;
+      if (state.filter === 'done' && !t.done) return false;
+      if (state.filter === 'today' && dayKey(t.startAt) !== todayKey) return false;
+      if (query) {
+        const haystack = `${t.title} ${noteText[t.id] || ''}`.toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
     }
     return true;
   });
@@ -505,8 +684,9 @@ function taskListHTML() {
     .sort((a, b) => a.startAt - b.startAt);
   const done = filtered.filter((t) => t.done).sort((a, b) => b.startAt - a.startAt);
 
+  const rowOpts = { showProject, projectMap };
   let html = '';
-  if (state.filter !== 'done') {
+  if (state.filter !== 'done' || !applyQuery) {
     if (overdueList.length) {
       html += `<div class="group overdue-group">
         <div class="group-head">
@@ -514,7 +694,7 @@ function taskListHTML() {
           <button class="btn tiny btn-danger" type="button" data-act="clear-overdue">全部删除</button>
         </div>
         ${overdueList
-          .map((t) => taskRowHTML(t, noteCount, fileCount, { quickDelete: true }))
+          .map((t) => taskRowHTML(t, noteCount, fileCount, { ...rowOpts, quickDelete: true }))
           .join('')}
       </div>`;
     }
@@ -529,22 +709,24 @@ function taskListHTML() {
       for (const [, rows] of groups) {
         html += `<div class="group">
           <div class="group-head"><span>${esc(relDayLabel(rows[0].startAt))}</span><span class="line"></span><span class="count">${rows.length}</span></div>
-          ${rows.map((t) => taskRowHTML(t, noteCount, fileCount)).join('')}
+          ${rows.map((t) => taskRowHTML(t, noteCount, fileCount, rowOpts)).join('')}
         </div>`;
       }
     } else if (!overdueList.length) {
-      html += emptyState('没有未完成的任务', '按「＋ 新任务」开始记录，或换个筛选条件看看。');
+      html += list.length
+        ? emptyState('没有符合的任务', '换个筛选条件或搜索字试试。')
+        : emptyState('这个专案还没有任务', '按「＋ 新任务」新增第一个任务。');
     }
 
     if (done.length) {
       html += `<div class="group">
         <div class="group-head"><span>已完成</span><span class="line"></span><span class="count">${done.length}</span></div>
-        ${done.map((t) => taskRowHTML(t, noteCount, fileCount)).join('')}
+        ${done.map((t) => taskRowHTML(t, noteCount, fileCount, rowOpts)).join('')}
       </div>`;
     }
   } else {
     html += done.length
-      ? done.map((t) => taskRowHTML(t, noteCount, fileCount)).join('')
+      ? done.map((t) => taskRowHTML(t, noteCount, fileCount, rowOpts)).join('')
       : emptyState('还没有已完成的任务', '完成任务后会自动收在这里。');
   }
 
@@ -553,18 +735,23 @@ function taskListHTML() {
 
 function taskRowHTML(task, noteCount, fileCount, opts = {}) {
   const c = catOf(task.cat);
+  const project = opts.projectMap && task.projectId ? opts.projectMap[task.projectId] : null;
+  const accent = project ? projectColor(project) : c.color;
   const overdue = isOverdue(task);
+  const projectChip = opts.showProject
+    ? `<span class="badge proj-badge">${esc(project ? project.name : '未分类')}</span>`
+    : '';
   const trailing = opts.quickDelete
     ? `<button class="row-del" type="button" data-act="delete-task-quick" data-id="${task.id}" aria-label="删除任务" title="删除任务">×</button>`
     : '<span class="chev" aria-hidden="true">›</span>';
-  return `<div class="task-row ${task.done ? 'done' : ''}" style="--c:${c.color}" data-act="open-task" data-id="${task.id}" role="button" tabindex="0">
+  return `<div class="task-row ${task.done ? 'done' : ''}" style="--c:${accent}" data-act="open-task" data-id="${task.id}" role="button" tabindex="0">
     <button class="check ${task.done ? 'on' : ''}" type="button" data-act="toggle-task" data-id="${task.id}" aria-label="${task.done ? '标记为未完成' : '标记为完成'}">✓</button>
     <div class="t-body">
       <div class="t-title">${esc(task.title)}</div>
       <div class="t-meta">
         <span class="dot" style="--c:${c.color}"></span>
         <span class="mono">${esc(fmtRange(task.startAt, task.endAt))}</span>
-        <span class="dim">${esc(c.label)}</span>
+        ${opts.showProject ? projectChip : `<span class="dim">${esc(c.label)}</span>`}
         ${overdue ? '<span class="badge warn">逾期</span>' : ''}
         ${fileCount[task.id] ? `<span class="badge">附件 ${fileCount[task.id]}</span>` : ''}
         ${noteCount[task.id] ? `<span class="badge">笔记 ${noteCount[task.id]}</span>` : ''}
@@ -577,9 +764,18 @@ function taskRowHTML(task, noteCount, fileCount, opts = {}) {
 function updateTaskList() {
   const list = document.getElementById('task-list');
   if (!list) return;
-  list.innerHTML = taskListHTML();
+  const route = state.route;
+  let tasks = state.tasks;
+  let options = { showProject: true };
+  if (route.name === 'project') {
+    tasks = tasksForProject(route.id);
+    options = { showProject: false, applyQuery: false };
+  } else if (route.name !== 'all') {
+    return;
+  }
+  list.innerHTML = taskListHTML(tasks, options);
   const sub = document.getElementById('task-sub');
-  if (sub) sub.textContent = taskSummary();
+  if (sub) sub.textContent = taskSummary(tasks);
 }
 
 /* ==========================================================================
@@ -684,62 +880,166 @@ function goMonth(delta) {
    备忘录
    ========================================================================== */
 
-function renderNotes() {
-  const standalone = state.notes.filter((n) => !n.taskId);
+function standaloneNotes() {
+  return state.notes.filter((n) => !n.taskId);
+}
+
+function folderById(id) {
+  return id ? state.folders.find((folder) => folder.id === id) : null;
+}
+
+function notesInFolder(folderId) {
+  return standaloneNotes().filter((note) => (folderId ? note.folderId === folderId : !note.folderId));
+}
+
+function renderNotesHome() {
+  const notes = standaloneNotes();
+  const cards = state.folders
+    .map((folder, index) => folderCardHTML(folder, index))
+    .join('');
+  const inbox = notesInFolder(null);
+  const inboxCard = inbox.length ? folderCardHTML({ id: null, name: '未分类' }, state.folders.length) : '';
+
   return `<section class="page">
     <div class="page-head">
       <div>
-        <h1>备忘录</h1>
-        <p class="sub" id="note-sub">${standalone.length} 则 · 独立笔记</p>
+        <h1>备忘</h1>
+        <p class="sub">${notes.length} 则 · ${state.folders.length} 个资料夹</p>
       </div>
-      <button class="btn btn-primary" type="button" data-act="new-note">＋ 新备忘</button>
+      <div class="head-actions">
+        <button class="btn" type="button" data-act="go-allnotes">全部笔记</button>
+        <button class="btn btn-primary" type="button" data-act="new-note">＋ 新备忘</button>
+        <button class="btn" type="button" data-act="new-folder">＋ 新资料夹</button>
+      </div>
+    </div>
+    ${cards || inboxCard
+      ? `<div class="project-grid">${cards}${inboxCard}</div>`
+      : emptyState('还没有备忘录', '按「＋ 新资料夹」建立分类，或按「＋ 新备忘」直接写。')}
+  </section>`;
+}
+
+function folderCardHTML(folder, index) {
+  const list = notesInFolder(folder.id);
+  const updated = list.reduce((max, note) => Math.max(max, note.updatedAt || 0), 0);
+  const color = folder.id
+    ? PROJECT_COLORS[index % PROJECT_COLORS.length].color
+    : '#6d6857';
+  return `<a class="project-card folder-card" href="#/folder/${folder.id || 'inbox'}" style="--c:${color}">
+    <div class="pc-head"><span class="pc-name">${esc(folder.name)}</span><span class="pc-count">${list.length} 则</span></div>
+    <div class="pc-next">${updated ? esc(fmtUpdated(updated)) : '还没有笔记'}</div>
+  </a>`;
+}
+
+function renderAllNotes() {
+  const notes = standaloneNotes();
+  return `<section class="page">
+    <div class="page-head">
+      <div>
+        <h1>全部笔记</h1>
+        <p class="sub" id="note-sub">${notes.length} 则</p>
+      </div>
+      <div class="head-actions">
+        <button class="btn" type="button" data-act="go-notes">‹ 资料夹</button>
+        <button class="btn btn-primary" type="button" data-act="new-note">＋ 新备忘</button>
+      </div>
     </div>
     <div class="toolbar">
       <div class="search-wrap">
         <span class="search-ico" aria-hidden="true">⌕</span>
-        <input id="note-search" class="input" type="search" placeholder="搜索备忘…" value="${esc(state.query.notes)}" autocomplete="off">
+        <input id="note-search" class="input" type="search" placeholder="搜索所有笔记…" value="${esc(state.query.notes)}" autocomplete="off">
       </div>
     </div>
-    <div id="note-list">${noteListHTML()}</div>
+    <div id="note-list">${noteListHTML(notes, { showFolder: true, applyQuery: true })}</div>
   </section>`;
 }
 
-function noteListHTML() {
-  const query = state.query.notes.trim().toLowerCase();
-  const list = state.notes
-    .filter((n) => !n.taskId)
-    .filter((n) => {
+function renderFolderPage(id) {
+  const folder = id ? folderById(id) : null;
+  if (id && !folder) return notFoundPage('资料夹不存在或已被删除', '#/notes');
+  const name = folder ? folder.name : '未分类';
+  const list = notesInFolder(id);
+
+  return `<section class="page">
+    <div class="detail-top">
+      <button class="btn tiny" type="button" data-act="go-notes">‹ 资料夹</button>
+      <span class="badge">${esc(name)}</span>
+      ${folder ? `<button class="btn tiny" type="button" data-act="edit-folder" data-id="${folder.id}">编辑</button>` : ''}
+      ${folder ? `<button class="btn tiny btn-danger" type="button" data-act="delete-folder" data-id="${folder.id}">删除</button>` : ''}
+      <span class="spacer"></span>
+      <button class="btn tiny btn-primary" type="button" data-act="new-note">＋ 新备忘</button>
+    </div>
+    <div class="page-head">
+      <div>
+        <h1>${esc(name)}</h1>
+        <p class="sub" id="note-sub">${list.length} 则</p>
+      </div>
+    </div>
+    <div id="note-list">${noteListHTML(list, { showFolder: false, applyQuery: false })}</div>
+  </section>`;
+}
+
+function noteListHTML(list, opts = {}) {
+  const { showFolder = false, applyQuery = true } = opts;
+  const query = applyQuery ? state.query.notes.trim().toLowerCase() : '';
+  const folderMap = {};
+  for (const folder of state.folders) folderMap[folder.id] = folder;
+
+  const rows = list
+    .filter((note) => {
       if (!query) return true;
-      return `${n.title} ${n.body}`.toLowerCase().includes(query);
+      return `${note.title || ''} ${note.body || ''}`.toLowerCase().includes(query);
     })
     .sort((a, b) => {
       if (Boolean(b.pinned) !== Boolean(a.pinned)) return b.pinned - a.pinned;
       return b.updatedAt - a.updatedAt;
     });
 
-  if (!list.length) {
-    return emptyState('还没有备忘录', '按「＋ 新备忘」随手记点什么。');
+  if (!rows.length) {
+    return list.length
+      ? emptyState('没有符合的笔记', '换个搜索字试试。')
+      : emptyState('这个资料夹还没有笔记', '按「＋ 新备忘」开始写。');
   }
-  return list.map((n) => noteRowHTML(n, true)).join('');
+  return rows
+    .map((note) => noteRowHTML(note, { showPin: true, showFolder, folderMap }))
+    .join('');
 }
 
-function noteRowHTML(note, showPin) {
+function noteRowHTML(note, opts = {}) {
+  const { showPin = false, showFolder = false, folderMap = {} } = opts;
+  const folder = note.folderId ? folderMap[note.folderId] : null;
+  const folderBadge = showFolder
+    ? `<span class="badge">${esc(folder ? folder.name : '未分类')}</span>`
+    : '';
   return `<div class="note-row" role="button" tabindex="0" data-act="open-note" data-id="${note.id}">
-    <div class="note-row-head">
-      <span class="n-title">${esc(note.title || '无标题笔记')}</span>
-      ${showPin && note.pinned ? '<span class="badge">置顶</span>' : ''}
+    <div class="note-row-main">
+      <div class="note-row-head">
+        <span class="n-title">${esc(note.title || '无标题笔记')}</span>
+        ${showPin && note.pinned ? '<span class="badge">置顶</span>' : ''}
+        ${folderBadge}
+      </div>
+      <div class="n-prev">${esc(notePreview(note))}</div>
+      <div class="n-time">${esc(fmtUpdated(note.updatedAt))}</div>
     </div>
-    <div class="n-prev">${esc(notePreview(note))}</div>
-    <div class="n-time">${esc(fmtUpdated(note.updatedAt))}</div>
+    <button class="row-export" type="button" data-act="export-note" data-id="${note.id}" title="汇出笔记" aria-label="汇出笔记">⇩</button>
   </div>`;
 }
 
 function updateNoteList() {
   const list = document.getElementById('note-list');
   if (!list) return;
-  list.innerHTML = noteListHTML();
+  const route = state.route;
+  let source;
+  if (route.name === 'allnotes') {
+    source = standaloneNotes();
+    list.innerHTML = noteListHTML(source, { showFolder: true, applyQuery: true });
+  } else if (route.name === 'folder') {
+    source = notesInFolder(route.id);
+    list.innerHTML = noteListHTML(source, { showFolder: false, applyQuery: false });
+  } else {
+    return;
+  }
   const sub = document.getElementById('note-sub');
-  if (sub) sub.textContent = `${state.notes.filter((n) => !n.taskId).length} 则 · 独立笔记`;
+  if (sub) sub.textContent = `${source.length} 则`;
 }
 
 /* ---------- 笔记编辑器（富文本，像 iOS 备忘录） ---------- */
@@ -800,15 +1100,17 @@ function renderNoteEditor(id) {
 
   state.editingNoteId = note.id;
   lastRange = null;
-  const backAct = note.taskId ? 'back-task' : 'back-notes';
-  const backLabel = note.taskId ? '‹ 任务' : '‹ 备忘';
+  const folder = note.folderId ? folderById(note.folderId) : null;
+  const backAct = note.taskId ? 'back-task' : note.folderId ? 'back-folder' : 'back-notes';
+  const backLabel = note.taskId ? '‹ 任务' : note.folderId ? '‹ 资料夹' : '‹ 备忘';
   const initialHtml = note.html ? sanitizeHtml(note.html) : renderMarkdown(note.body || '');
 
   return `<section class="editor">
     <div class="editor-bar">
       <button class="btn tiny" type="button" data-act="${backAct}">${backLabel}</button>
-      <span class="save-state" id="save-state">已储存</span>
       <span class="spacer"></span>
+      ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="move-note" data-id="${note.id}" title="移动到资料夹">📁 ${esc(folder ? folder.name : '未分类')}</button>`}
+      <button class="btn tiny" type="button" data-act="export-note" data-id="${note.id}">⇩ 汇出</button>
       ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="toggle-pin" data-id="${note.id}">${note.pinned ? '取消置顶' : '置顶'}</button>`}
       <button class="btn tiny btn-danger" type="button" data-act="delete-note" data-id="${note.id}">删除</button>
     </div>
@@ -835,6 +1137,7 @@ function renderNoteEditor(id) {
     <div id="note-body" class="note-body rich-content" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="开始输入…">${initialHtml}</div>
     <div class="editor-foot">
       <span id="note-count">${charCount(note.body)} 字</span>
+      <span class="save-state" id="save-state">已储存</span>
       <div class="foot-right">
         <span class="md-hint">${isIOS() ? '语音：用键盘 🎤 听写' : '支援表格、清单与粗体'}</span>
         <span id="note-updated">更新于 ${esc(fmtUpdated(note.updatedAt))}</span>
@@ -1126,11 +1429,12 @@ async function saveNoteNow() {
   }
 }
 
-async function createNote(taskId) {
+async function createNote(taskId, folderId) {
   const now = Date.now();
   const note = {
     id: uid(),
     taskId: taskId || null,
+    folderId: taskId ? null : folderId || null,
     title: '',
     body: '',
     html: '',
@@ -1185,7 +1489,9 @@ async function deleteNoteFlow(id) {
   state.notes = state.notes.filter((n) => n.id !== id);
   if (state.editingNoteId === id) {
     state.editingNoteId = null;
-    location.hash = note.taskId ? `#/task/${encodeURIComponent(note.taskId)}` : '#/notes';
+    if (note.taskId) location.hash = `#/task/${encodeURIComponent(note.taskId)}`;
+    else if (note.folderId) location.hash = `#/folder/${encodeURIComponent(note.folderId)}`;
+    else location.hash = '#/notes';
   } else {
     toast('已删除笔记');
     render({ scroll: false });
@@ -1217,14 +1523,18 @@ async function renderTaskDetail(id) {
     fileItems.push(fileItemHTML(meta, url));
   }
 
+  const project = task.projectId ? projectById(task.projectId) : null;
+  const backHash = project ? `#/project/${encodeURIComponent(project.id)}` : '#/tasks';
+
   return `<section class="page detail">
     <div class="detail-top">
-      <button class="btn tiny" type="button" data-act="back-tasks">‹ 待办</button>
+      <a class="btn tiny" href="${backHash}">‹ ${project ? esc(project.name) : '专案'}</a>
       <span class="badge ${task.done ? 'ok' : ''}">${task.done ? '已完成' : '进行中'}</span>
     </div>
     <h1 class="detail-title ${task.done ? 'done' : ''}">${esc(task.title)}</h1>
     <div class="chips meta-chips">
       <span class="chip static"><span class="dot" style="--c:${c.color}"></span>${esc(c.label)}</span>
+      <a class="chip" href="${project ? `#/project/${encodeURIComponent(project.id)}` : '#/project/inbox'}">📁 ${esc(project ? project.name : '未分类')}</a>
       <span class="chip static">${esc(fmtDateCN(task.startAt))}</span>
       <span class="chip static mono">${esc(fmtRange(task.startAt, task.endAt))}</span>
       <span class="chip static">${esc(fmtDuration((task.endAt - task.startAt) / 60000))}</span>
@@ -1246,7 +1556,7 @@ async function renderTaskDetail(id) {
 
     <section class="panel">
       <div class="panel-head"><h2>任务笔记</h2><span class="count">${notes.length}</span></div>
-      ${notes.length ? `<div class="notes">${notes.map((n) => noteRowHTML(n, false)).join('')}</div>` : '<p class="empty-inline">在任务里写笔记，回头一看就懂。</p>'}
+      ${notes.length ? `<div class="notes">${notes.map((n) => noteRowHTML(n, {})).join('')}</div>` : '<p class="empty-inline">在任务里写笔记，回头一看就懂。</p>'}
     </section>
 
     <section class="panel danger">
@@ -1326,7 +1636,7 @@ async function deleteTaskFlow(id) {
   toast('已删除任务');
 
   if (state.route.name === 'task' && state.route.id === id) {
-    location.hash = '#/tasks';
+    location.hash = task.projectId ? `#/project/${encodeURIComponent(task.projectId)}` : '#/tasks';
   } else {
     await render({ scroll: false });
   }
@@ -1367,7 +1677,8 @@ async function deleteTaskQuick(id) {
 }
 
 async function clearOverdue() {
-  const list = state.tasks.filter((t) => isOverdue(t));
+  const scope = state.route.name === 'project' ? tasksForProject(state.route.id) : state.tasks;
+  const list = scope.filter((t) => isOverdue(t));
   if (!list.length) {
     toast('没有逾期任务');
     return;
@@ -1387,6 +1698,362 @@ async function clearOverdue() {
   }
   toast(`已删除 ${list.length} 个逾期任务`);
   await render({ scroll: false });
+}
+
+/* ==========================================================================
+   专案
+   ========================================================================== */
+
+function openProjectModal(project = null) {
+  const isEdit = Boolean(project);
+  const currentColor = project ? project.color : 'blue';
+  const colorChips = PROJECT_COLORS.map(
+    (item) =>
+      `<button class="chip color-chip ${item.id === currentColor ? 'on' : ''}" type="button" data-color="${item.id}" style="--swatch:${item.color}"><i class="swatch"></i>${item.label}</button>`
+  ).join('');
+
+  const m = openModal(`
+    <div class="modal-head">
+      <h2>${isEdit ? '编辑专案' : '新专案'}</h2>
+      <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
+    </div>
+    <div class="form">
+      <label class="field"><span>名称</span>
+        <input id="p-name" type="text" maxlength="60" placeholder="例如：工作、部落格、装修" value="${esc(isEdit ? project.name : '')}" autocomplete="off">
+      </label>
+      <div class="field"><span>颜色</span>
+        <div class="chips" id="p-colors">${colorChips}</div>
+      </div>
+      <div class="form-error" id="p-error" hidden></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-act="close-modal">取消</button>
+        <button class="btn btn-primary" type="button" data-act="save-project" data-id="${isEdit ? project.id : ''}">${isEdit ? '保存' : '建立专案'}</button>
+      </div>
+    </div>`, { focus: '#p-name' });
+
+  m.el.querySelectorAll('#p-colors [data-color]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      m.el.querySelectorAll('#p-colors [data-color]').forEach((other) => {
+        other.classList.toggle('on', other === chip);
+      });
+    });
+  });
+}
+
+function showProjectError(message) {
+  const box = document.getElementById('p-error');
+  if (box) {
+    box.hidden = false;
+    box.textContent = message;
+  }
+}
+
+async function saveProjectFromModal(button) {
+  const modal = button.closest('.modal');
+  if (!modal) return;
+  const name = (modal.querySelector('#p-name')?.value || '').trim();
+  if (!name) {
+    showProjectError('请填写专案名称');
+    return;
+  }
+  const picked = modal.querySelector('#p-colors [data-color].on');
+  const color = picked ? picked.dataset.color : 'blue';
+  const id = button.dataset.id || '';
+  const prev = id ? projectById(id) : null;
+  const now = Date.now();
+  const project = {
+    id: prev ? prev.id : uid(),
+    name,
+    color,
+    createdAt: prev ? prev.createdAt : now,
+    updatedAt: now,
+  };
+
+  try {
+    await db.projectPut(project);
+  } catch (err) {
+    showProjectError('储存失败：' + err.message);
+    return;
+  }
+
+  if (prev) {
+    const index = state.projects.findIndex((p) => p.id === prev.id);
+    if (index >= 0) state.projects[index] = project;
+    toast('已更新专案');
+  } else {
+    state.projects.push(project);
+    toast('已建立专案');
+  }
+  closeTopModal();
+  await render({ scroll: false });
+}
+
+async function deleteProjectFlow(id) {
+  const project = projectById(id);
+  if (!project) return;
+  const tasks = state.tasks.filter((t) => t.projectId === id);
+  const ok = await confirmDialog({
+    title: '删除专案',
+    message: `「${project.name}」里的 ${tasks.length} 个任务会移到「未分类」，不会被删除。`,
+    confirmText: '删除专案',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    for (const task of tasks) {
+      task.projectId = null;
+      task.updatedAt = Date.now();
+      await db.taskPut(task);
+    }
+    await db.projectDel(id);
+  } catch (err) {
+    toast('删除失败：' + err.message);
+    return;
+  }
+
+  state.projects = state.projects.filter((p) => p.id !== id);
+  toast('已删除专案，任务已移到未分类');
+  if (location.hash !== '#/tasks') location.hash = '#/tasks';
+  else await render({ scroll: false });
+}
+
+/* ==========================================================================
+   笔记资料夹
+   ========================================================================== */
+
+function openFolderModal(folder = null) {
+  const isEdit = Boolean(folder);
+  openModal(`
+    <div class="modal-head">
+      <h2>${isEdit ? '编辑资料夹' : '新资料夹'}</h2>
+      <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
+    </div>
+    <div class="form">
+      <label class="field"><span>名称</span>
+        <input id="d-name" type="text" maxlength="60" placeholder="例如：灵感、工作、读书" value="${esc(isEdit ? folder.name : '')}" autocomplete="off">
+      </label>
+      <div class="form-error" id="d-error" hidden></div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-act="close-modal">取消</button>
+        <button class="btn btn-primary" type="button" data-act="save-folder" data-id="${isEdit ? folder.id : ''}">${isEdit ? '保存' : '建立资料夹'}</button>
+      </div>
+    </div>`, { focus: '#d-name' });
+}
+
+function showFolderError(message) {
+  const box = document.getElementById('d-error');
+  if (box) {
+    box.hidden = false;
+    box.textContent = message;
+  }
+}
+
+async function saveFolderFromModal(button) {
+  const modal = button.closest('.modal');
+  if (!modal) return;
+  const name = (modal.querySelector('#d-name')?.value || '').trim();
+  if (!name) {
+    showFolderError('请填写资料夹名称');
+    return;
+  }
+  const id = button.dataset.id || '';
+  const prev = id ? folderById(id) : null;
+  const now = Date.now();
+  const folder = {
+    id: prev ? prev.id : uid(),
+    name,
+    createdAt: prev ? prev.createdAt : now,
+    updatedAt: now,
+  };
+
+  try {
+    await db.folderPut(folder);
+  } catch (err) {
+    showFolderError('储存失败：' + err.message);
+    return;
+  }
+
+  if (prev) {
+    const index = state.folders.findIndex((f) => f.id === prev.id);
+    if (index >= 0) state.folders[index] = folder;
+    toast('已更新资料夹');
+  } else {
+    state.folders.push(folder);
+    toast('已建立资料夹');
+  }
+  closeTopModal();
+  await render({ scroll: false });
+}
+
+async function deleteFolderFlow(id) {
+  const folder = folderById(id);
+  if (!folder) return;
+  const notes = notesInFolder(id);
+  const ok = await confirmDialog({
+    title: '删除资料夹',
+    message: `「${folder.name}」里的 ${notes.length} 则笔记会移到「未分类」，不会被删除。`,
+    confirmText: '删除资料夹',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    for (const note of notes) {
+      note.folderId = null;
+      note.updatedAt = Date.now();
+      await db.notePut(note);
+    }
+    await db.folderDel(id);
+  } catch (err) {
+    toast('删除失败：' + err.message);
+    return;
+  }
+
+  state.folders = state.folders.filter((f) => f.id !== id);
+  toast('已删除资料夹，笔记已移到未分类');
+  if (location.hash !== '#/notes') location.hash = '#/notes';
+  else await render({ scroll: false });
+}
+
+function openMoveNoteModal(noteId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note) return;
+  const rows = [
+    `<button class="move-row ${!note.folderId ? 'on' : ''}" type="button" data-act="move-note-to" data-id="${note.id}" data-folder="">未分类</button>`,
+  ]
+    .concat(
+      state.folders.map(
+        (folder) =>
+          `<button class="move-row ${note.folderId === folder.id ? 'on' : ''}" type="button" data-act="move-note-to" data-id="${note.id}" data-folder="${folder.id}">${esc(folder.name)}</button>`
+      )
+    )
+    .join('');
+
+  openModal(`
+    <div class="modal-head">
+      <h2>移动到资料夹</h2>
+      <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
+    </div>
+    <div class="move-list">${rows}</div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn" type="button" data-act="new-folder">＋ 新资料夹</button>
+    </div>`);
+}
+
+async function moveNoteTo(noteId, folderId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note) return;
+  note.folderId = folderId || null;
+  note.updatedAt = Date.now();
+  try {
+    await db.notePut(note);
+  } catch (err) {
+    toast('移动失败：' + err.message);
+    return;
+  }
+  closeTopModal();
+  toast('已移动笔记');
+  await render({ scroll: false });
+}
+
+/* ==========================================================================
+   汇出笔记
+   ========================================================================== */
+
+function exportNoteHtml(title, html) {
+  return `<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<title>${esc(title)}</title>
+<style>
+  body { max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #191820;
+         font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  h1 { font-size: 28px; margin-bottom: 24px; }
+  h2 { font-size: 22px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
+  th { background: #f2eee2; }
+  blockquote { margin: 12px 0; padding: 6px 12px; color: #555; border-left: 4px solid #ccc; }
+  pre { padding: 10px; overflow: auto; background: #f2eee2; }
+  .todo-box { margin-right: 4px; }
+  li.done { color: #777; text-decoration: line-through; }
+</style>
+</head>
+<body>
+<h1>${esc(title)}</h1>
+${html || '<p></p>'}
+</body>
+</html>`;
+}
+
+function noteExportContent(note, format) {
+  const title = note.title || '无标题笔记';
+  const html = note.html ? sanitizeHtml(note.html) : renderMarkdown(note.body || '');
+  if (format === 'txt') {
+    return {
+      text: `${title}\n\n${htmlToText(html) || note.body || ''}\n`,
+      type: 'text/plain;charset=utf-8',
+      ext: 'txt',
+    };
+  }
+  if (format === 'html') {
+    return {
+      text: exportNoteHtml(title, html),
+      type: 'text/html;charset=utf-8',
+      ext: 'html',
+    };
+  }
+  return {
+    text: `# ${title}\n\n${htmlToMarkdown(html)}\n`,
+    type: 'text/markdown;charset=utf-8',
+    ext: 'md',
+  };
+}
+
+function safeFileName(value) {
+  const cleaned = String(value || 'note')
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  return cleaned || 'note';
+}
+
+function openExportNoteModal(noteId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note) return;
+  openModal(`
+    <div class="modal-head">
+      <h2>汇出笔记</h2>
+      <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
+    </div>
+    <p class="hint" style="margin-bottom:12px">「${esc(note.title || '无标题笔记')}」会下载到「文件」App。</p>
+    <div class="export-list">
+      <button class="export-row" type="button" data-act="export-note-format" data-id="${note.id}" data-format="md">
+        <strong>Markdown (.md)</strong><span>保留标题、清单与表格，方便搬到别的笔记软体</span>
+      </button>
+      <button class="export-row" type="button" data-act="export-note-format" data-id="${note.id}" data-format="txt">
+        <strong>纯文本 (.txt)</strong><span>只要文字，任何地方都能打开</span>
+      </button>
+      <button class="export-row" type="button" data-act="export-note-format" data-id="${note.id}" data-format="html">
+        <strong>网页 (.html)</strong><span>保留格式，可用浏览器打开或印成 PDF</span>
+      </button>
+    </div>`);
+}
+
+function exportNoteFormat(noteId, format) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note) return;
+  const payload = noteExportContent(note, format);
+  const stamp = toDateValue(Date.now()).replace(/-/g, '');
+  downloadBlob(
+    new Blob([payload.text], { type: payload.type }),
+    `${safeFileName(note.title || 'note')}-${stamp}.${payload.ext}`
+  );
+  closeTopModal();
+  toast('已汇出笔记');
 }
 
 /* ---------- 新增 / 编辑任务弹窗 ---------- */
@@ -1440,6 +2107,24 @@ function openTaskModal(task, preset = {}) {
     ([value, label]) => `<option value="${value}" ${String(remindValue) === value ? 'selected' : ''}>${label}</option>`
   ).join('');
 
+  let currentProjectId;
+  if (isEdit) {
+    currentProjectId = task.projectId || '';
+  } else if (preset.projectId !== undefined) {
+    currentProjectId = preset.projectId || '';
+  } else {
+    currentProjectId =
+      state.route && state.route.name === 'project' && state.route.id ? state.route.id : '';
+  }
+  const projectOptions = [`<option value="">未分类</option>`]
+    .concat(
+      state.projects.map(
+        (project) =>
+          `<option value="${project.id}" ${project.id === currentProjectId ? 'selected' : ''}>${esc(project.name)}</option>`
+      )
+    )
+    .join('');
+
   const m = openModal(`
     <div class="modal-head">
       <h2>${isEdit ? '编辑任务' : '新任务'}</h2>
@@ -1469,6 +2154,9 @@ function openTaskModal(task, preset = {}) {
         <button class="btn tiny" type="button" data-act="set-dur" data-dur="90">1.5 小时</button>
         <button class="btn tiny" type="button" data-act="set-dur" data-dur="120">2 小时</button>
       </div>
+      <label class="field"><span>专案</span>
+        <select id="f-project">${projectOptions}</select>
+      </label>
       <div class="field-row two">
         <label class="field"><span>分类</span>
           <select id="f-cat">${catOptions}</select>
@@ -1551,6 +2239,7 @@ async function saveTaskFromModal(button) {
   const cat = modal.querySelector('#f-cat')?.value || 'other';
   const remindRaw = modal.querySelector('#f-remind')?.value ?? 'none';
   const remind = remindRaw === 'none' ? null : Number(remindRaw);
+  const projectId = modal.querySelector('#f-project')?.value || null;
 
   if (!title) {
     showError('请先填写标题');
@@ -1580,6 +2269,7 @@ async function saveTaskFromModal(button) {
     startAt,
     endAt,
     cat: CAT[cat] ? cat : 'other',
+    projectId: projectId || null,
     done: prev ? prev.done : 0,
     remind: Number.isFinite(remind) ? remind : null,
     createdAt: prev ? prev.createdAt : now,
@@ -1848,7 +2538,7 @@ function openSettings() {
 
     <section class="set-block">
       <h3>应用</h3>
-      <p class="hint">Pixel Notes v1.2 · 离线优先，不需要网络。</p>
+      <p class="hint">Pixel Notes v1.3 · 离线优先，不需要网络。</p>
       <button class="btn" type="button" data-act="force-update">检查更新（清除快取）</button>
     </section>
 
@@ -2048,10 +2738,12 @@ async function exportBackup() {
   try {
     const payload = {
       app: 'pixel-notes',
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       tasks: state.tasks,
       notes: state.notes,
+      projects: state.projects,
+      folders: state.folders,
       files: [],
     };
     for (const meta of state.files) {
@@ -2097,7 +2789,13 @@ async function handleImportFile(event) {
 
   try {
     await db.clearAll();
-    const payload = { tasks: data.tasks, notes: data.notes || [], files: [] };
+    const payload = {
+      tasks: data.tasks,
+      notes: data.notes || [],
+      projects: data.projects || [],
+      folders: data.folders || [],
+      files: [],
+    };
     for (const row of fileRows) {
       if (!row || !row.meta) continue;
       payload.files.push({
@@ -2135,6 +2833,8 @@ async function clearAllFlow() {
   state.tasks = [];
   state.notes = [];
   state.files = [];
+  state.projects = [];
+  state.folders = [];
   state.editingNoteId = null;
   closeTopModal();
   toast('已清空资料');
@@ -2293,11 +2993,62 @@ async function onAction(action, el) {
     case 'new-task-day':
       openTaskModal(null, { dayTs: state.selectedDay.getTime() });
       return;
-    case 'new-note':
-      await createNote(null);
+    case 'new-note': {
+      const folderId = state.route.name === 'folder' ? state.route.id : null;
+      await createNote(null, folderId);
       return;
+    }
     case 'add-note':
       await createNote(id);
+      return;
+    case 'new-project':
+      openProjectModal();
+      return;
+    case 'edit-project':
+      openProjectModal(projectById(id));
+      return;
+    case 'save-project':
+      await saveProjectFromModal(el);
+      return;
+    case 'delete-project':
+      await deleteProjectFlow(id);
+      return;
+    case 'go-tasks':
+      location.hash = '#/tasks';
+      return;
+    case 'go-all':
+      location.hash = '#/all';
+      return;
+    case 'go-notes':
+      location.hash = '#/notes';
+      return;
+    case 'go-allnotes':
+      location.hash = '#/allnotes';
+      return;
+    case 'new-folder':
+      openFolderModal();
+      return;
+    case 'edit-folder':
+      openFolderModal(folderById(id));
+      return;
+    case 'save-folder':
+      await saveFolderFromModal(el);
+      return;
+    case 'delete-folder':
+      await deleteFolderFlow(id);
+      return;
+    case 'move-note':
+      openMoveNoteModal(id);
+      return;
+    case 'move-note-to':
+      await moveNoteTo(id, el.dataset.folder || '');
+      return;
+    case 'export-note':
+      if (state.editingNoteId === id) await saveNoteNow();
+      openExportNoteModal(id);
+      return;
+    case 'export-note-format':
+      exportNoteFormat(id, el.dataset.format || 'md');
       return;
     case 'edit-task': {
       const task = state.tasks.find((t) => t.id === id);
@@ -2412,6 +3163,11 @@ async function onAction(action, el) {
     case 'back-task': {
       const note = state.notes.find((n) => n.id === state.editingNoteId);
       location.hash = note && note.taskId ? `#/task/${encodeURIComponent(note.taskId)}` : '#/notes';
+      return;
+    }
+    case 'back-folder': {
+      const note = state.notes.find((n) => n.id === state.editingNoteId);
+      location.hash = note && note.folderId ? `#/folder/${encodeURIComponent(note.folderId)}` : '#/notes';
       return;
     }
     case 'toggle-pin':

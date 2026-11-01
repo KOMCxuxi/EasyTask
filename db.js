@@ -7,7 +7,7 @@
 //   meta    设定与杂项（key: key）
 
 const DB_NAME = 'pixel-notes';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise = null;
 
@@ -36,6 +36,12 @@ export function openDB() {
       }
       if (!idb.objectStoreNames.contains('meta')) {
         idb.createObjectStore('meta', { keyPath: 'key' });
+      }
+      if (!idb.objectStoreNames.contains('projects')) {
+        idb.createObjectStore('projects', { keyPath: 'id' });
+      }
+      if (!idb.objectStoreNames.contains('folders')) {
+        idb.createObjectStore('folders', { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -140,6 +146,26 @@ export const db = {
     return request('blobs', 'readwrite', (s) => s.put(blob, id));
   },
 
+  // ---- 专案 / 笔记资料夹 ----
+  projectsAll() {
+    return request('projects', 'readonly', (s) => s.getAll());
+  },
+  projectPut(project) {
+    return request('projects', 'readwrite', (s) => s.put(project));
+  },
+  projectDel(id) {
+    return request('projects', 'readwrite', (s) => s.delete(id));
+  },
+  foldersAll() {
+    return request('folders', 'readonly', (s) => s.getAll());
+  },
+  folderPut(folder) {
+    return request('folders', 'readwrite', (s) => s.put(folder));
+  },
+  folderDel(id) {
+    return request('folders', 'readwrite', (s) => s.delete(id));
+  },
+
   // ---- 设定 ----
   metaGet(key) {
     return request('meta', 'readonly', (s) => s.get(key)).then((row) => (row ? row.value : undefined));
@@ -150,13 +176,13 @@ export const db = {
 
   // ---- 批量 ----
   clearAll() {
-    const stores = ['tasks', 'notes', 'files', 'blobs', 'meta'];
+    const stores = ['tasks', 'notes', 'files', 'blobs', 'meta', 'projects', 'folders'];
     return multi(stores, 'readwrite', (tx) => {
       stores.forEach((name) => tx.objectStore(name).clear());
     });
   },
   importAll(payload) {
-    return multi(['tasks', 'notes', 'files', 'blobs', 'meta'], 'readwrite', (tx) => {
+    return multi(['tasks', 'notes', 'files', 'blobs', 'meta', 'projects', 'folders'], 'readwrite', (tx) => {
       const tasks = tx.objectStore('tasks');
       const notes = tx.objectStore('notes');
       const files = tx.objectStore('files');
@@ -168,6 +194,8 @@ export const db = {
         files.put(row.meta);
         if (row.blob) blobs.put(row.blob, row.meta.id);
       });
+      (payload.projects || []).forEach((p) => tx.objectStore('projects').put(p));
+      (payload.folders || []).forEach((f) => tx.objectStore('folders').put(f));
       tx.objectStore('meta').put({ key: 'seeded', value: true });
     });
   },
