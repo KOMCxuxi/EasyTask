@@ -1,7 +1,17 @@
 // util.js — 纯函数工具（不依赖 DOM / IndexedDB，方便单独测试）
 // 全部时间都按「装置本地时区」处理，存档里存毫秒时间戳。
+import { getLang } from './i18n.js';
 
 export const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+const WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEK_HEADER_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEK_HEADER_ZH = ['一', '二', '三', '四', '五', '六', '日'];
+
+const en = () => getLang() !== 'zh-Hant';
+
+export function weekHeader() {
+  return en() ? WEEK_HEADER_EN.slice() : WEEK_HEADER_ZH.slice();
+}
 
 export const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -59,7 +69,14 @@ export function fmtDateShort(ts) {
 
 export function fmtDateCN(ts) {
   const d = new Date(ts);
-  return `${d.getMonth() + 1}月${d.getDate()}日 周${WEEKDAYS[d.getDay()]}`;
+  if (en()) {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      weekday: 'short',
+    }).format(d);
+  }
+  return `${d.getMonth() + 1}月${d.getDate()}日 週${WEEKDAYS[d.getDay()]}`;
 }
 
 /** 同一天显示 14:00–15:30；跨天显示 11/1 14:00 → 11/2 09:00 */
@@ -75,11 +92,18 @@ export function fmtDuration(minutes) {
   const days = Math.floor(min / 1440);
   const hours = Math.floor((min % 1440) / 60);
   const mins = min % 60;
+  if (en()) {
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours) parts.push(`${hours}h`);
+    if (mins) parts.push(`${mins}m`);
+    return parts.length ? parts.join(' ') : '0m';
+  }
   const parts = [];
   if (days) parts.push(`${days} 天`);
-  if (hours) parts.push(`${hours} 小时`);
-  if (mins) parts.push(`${mins} 分钟`);
-  return parts.length ? parts.join(' ') : '0 分钟';
+  if (hours) parts.push(`${hours} 小時`);
+  if (mins) parts.push(`${mins} 分鐘`);
+  return parts.length ? parts.join(' ') : '0 分鐘';
 }
 
 export function humanSize(bytes) {
@@ -98,23 +122,36 @@ export function humanSize(bytes) {
 /** 今天 / 明天 / 昨天 / 11月1日 周六 */
 export function relDayLabel(ts, now = Date.now()) {
   const k = dayKey(ts);
-  if (k === dayKey(now)) return '今天';
-  if (k === dayKey(addDays(now, 1))) return '明天';
-  if (k === dayKey(addDays(now, -1))) return '昨天';
+  if (k === dayKey(now)) return en() ? 'Today' : '今天';
+  if (k === dayKey(addDays(now, 1))) return en() ? 'Tomorrow' : '明天';
+  if (k === dayKey(addDays(now, -1))) return en() ? 'Yesterday' : '昨天';
   const d = new Date(ts);
+  if (en()) {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      weekday: 'short',
+    }).format(d);
+  }
   const year = d.getFullYear() !== new Date(now).getFullYear() ? `${d.getFullYear()}年` : '';
-  return `${year}${d.getMonth() + 1}月${d.getDate()}日 周${WEEKDAYS[d.getDay()]}`;
+  return `${year}${d.getMonth() + 1}月${d.getDate()}日 週${WEEKDAYS[d.getDay()]}`;
 }
 
 /** 刚刚 / 12 分钟前 / 3 小时前 / 昨天 / 11月1日 */
 export function fmtUpdated(ts, now = Date.now()) {
   const diff = now - ts;
-  if (diff < 60 * 1000) return '刚刚';
-  if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)} 分钟前`;
-  if (dayKey(ts) === dayKey(now)) return `${Math.floor(diff / 3600000)} 小时前`;
-  if (dayKey(ts) === dayKey(addDays(now, -1))) return '昨天';
+  if (diff < 60 * 1000) return en() ? 'just now' : '剛剛';
+  if (diff < 60 * 60 * 1000) {
+    return en() ? `${Math.floor(diff / 60000)} min ago` : `${Math.floor(diff / 60000)} 分鐘前`;
+  }
+  if (dayKey(ts) === dayKey(now)) {
+    return en() ? `${Math.floor(diff / 3600000)} hr ago` : `${Math.floor(diff / 3600000)} 小時前`;
+  }
+  if (dayKey(ts) === dayKey(addDays(now, -1))) return en() ? 'yesterday' : '昨天';
   const d = new Date(ts);
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return en()
+    ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(d)
+    : `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 /** 周一开头的月历网格，总是 5 或 6 行 × 7 列 */
@@ -137,6 +174,9 @@ export function monthGrid(year, month) {
 }
 
 export function monthLabel(year, month) {
+  if (en()) {
+    return `${new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date(year, month, 1))} ${year}`;
+  }
   return `${year} 年 ${month + 1} 月`;
 }
 
@@ -167,9 +207,9 @@ export function effectiveRemind(task) {
 
 export function reminderLabel(task) {
   const minutes = effectiveRemind(task);
-  if (minutes === null) return '不提醒';
-  if (minutes === 0) return '准时提醒';
-  return `提前 ${minutes} 分钟`;
+  if (minutes === null) return en() ? 'No reminder' : '不提醒';
+  if (minutes === 0) return en() ? 'On time' : '準時提醒';
+  return en() ? `${minutes} min before` : `提前 ${minutes} 分鐘`;
 }
 
 /** 过期 = 未完成且结束时间已经过去 */
@@ -191,7 +231,7 @@ export function esc(value) {
 /** 笔记预览：空白折叠、截断 */
 export function notePreview(note, max = 90) {
   const text = String(note.body || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '（空白笔记）';
+  if (!text) return en() ? '(blank note)' : '（空白筆記）';
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 

@@ -1413,6 +1413,145 @@ select {
   background: var(--hl-yellow);
 }
 
+/* ---------- 专案排序 / 封存 ---------- */
+
+.pc-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.project-card.sorting {
+  cursor: grab;
+  touch-action: none;
+}
+
+.project-card.dragging {
+  opacity: 0.55;
+  outline: 2px dashed var(--ink);
+}
+
+.pc-sort {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.pc-sort-btn {
+  flex: 1 1 auto;
+  height: 26px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--card-2);
+  border: 2px solid var(--line);
+  cursor: pointer;
+}
+
+.project-card.archived {
+  opacity: 0.62;
+}
+
+.archived-group {
+  margin-top: 22px;
+}
+
+.sort-hint {
+  margin: -4px 0 12px;
+}
+
+.project-filter {
+  margin-top: 2px;
+}
+
+/* ---------- 笔记列印 / PDF ---------- */
+
+.print-root {
+  display: none;
+}
+
+body.printing .app,
+body.printing .toast-root,
+body.printing #modal-root {
+  display: none !important;
+}
+
+@media print {
+  body {
+    background: #fff !important;
+  }
+
+  .app,
+  .toast-root,
+  #modal-root {
+    display: none !important;
+  }
+
+  .print-root {
+    display: block !important;
+  }
+
+  .print-note {
+    max-width: 680px;
+    margin: 0 auto;
+    color: #000;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .print-note h1 {
+    margin: 0 0 20px;
+    font-size: 26px;
+  }
+
+  .print-note h2 {
+    font-size: 20px;
+  }
+
+  .print-note table {
+    width: 100%;
+    margin: 12px 0;
+    border-collapse: collapse;
+  }
+
+  .print-note th,
+  .print-note td {
+    padding: 6px 8px;
+    text-align: left;
+    border: 1px solid #888;
+  }
+
+  .print-note th {
+    background: #eee;
+  }
+
+  .print-note blockquote {
+    margin: 12px 0;
+    padding: 4px 12px;
+    color: #555;
+    border-left: 3px solid #ccc;
+  }
+
+  .print-note pre {
+    padding: 8px;
+    overflow: hidden;
+    background: #f4f4f4;
+  }
+
+  .print-note .todo-box {
+    margin-right: 4px;
+  }
+
+  .print-note li.done {
+    color: #777;
+    text-decoration: line-through;
+  }
+
+  .print-note img {
+    max-width: 100%;
+  }
+}
+
 /* ---------- 载入 / 其他 ---------- */
 
 .loading {

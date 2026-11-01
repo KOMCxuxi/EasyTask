@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-Hans">
 <head>
   <meta charset="utf-8">
@@ -36,7 +36,7 @@
 <body>
   <div class="app" id="app">
     <header class="topbar">
-      <a class="brand" href="#/tasks" aria-label="Pixel Notes 首页">
+      <a class="brand" href="#/tasks" aria-label="Pixel Notes 首页" data-i18n-aria="Pixel Notes 首页">
         <svg class="brand-mark" viewBox="0 0 16 16" width="22" height="22" aria-hidden="true" focusable="false" shape-rendering="crispEdges">
           <rect width="16" height="16" fill="#f2eee2"/>
           <rect x="2" y="1" width="12" height="14" fill="#191820"/>
@@ -51,15 +51,15 @@
         <span class="brand-text">PIXEL<em>NOTES</em></span>
       </a>
 
-      <nav class="tabs" id="tabs" aria-label="主选单">
-        <a href="#/tasks" data-tab="tasks">待办</a>
-        <a href="#/calendar" data-tab="calendar">日历</a>
-        <a href="#/notes" data-tab="notes">备忘</a>
+      <nav class="tabs" id="tabs" aria-label="主选单" data-i18n-aria="主选单">
+        <a href="#/tasks" data-tab="tasks" data-i18n="待办">待办</a>
+        <a href="#/calendar" data-tab="calendar" data-i18n="日历">日历</a>
+        <a href="#/notes" data-tab="notes" data-i18n="备忘">备忘</a>
       </nav>
 
       <button class="icon-btn" id="btn-theme" type="button" data-act="cycle-theme" aria-label="切换主题" title="切换主题">◐</button>
 
-      <button class="icon-btn" id="btn-settings" type="button" data-act="open-settings" aria-label="设置" title="设置">⚙</button>
+      <button class="icon-btn" id="btn-settings" type="button" data-act="open-settings" aria-label="设置" title="设置" data-i18n-aria="设置" data-i18n-title="设置">⚙</button>
     </header>
 
     <main class="view" id="view" tabindex="-1">
@@ -72,6 +72,7 @@
   </div>
 
   <div id="modal-root"></div>
+  <div id="print-root" class="print-root"></div>
   <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
 
   <script>
@@ -113,7 +114,7 @@
       document.addEventListener('DOMContentLoaded', function () {
         // 离线时（已经从快取启动）就不做网路检查，避免误报
         if (navigator.onLine) {
-          var cores = ['app.js', 'db.js', 'util.js', 'ics.js', 'md.js', 'richtext.js', 'styles.css'];
+          var cores = ['app.js', 'db.js', 'util.js', 'ics.js', 'md.js', 'richtext.js', 'i18n.js', 'styles.css'];
           Promise.all(cores.map(function (name) {
             return fetch('./' + name + '?preflight=' + Date.now(), { cache: 'no-store' })
               .then(function (res) { return { name: name, ok: res.ok }; })

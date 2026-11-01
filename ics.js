@@ -3,15 +3,17 @@
 // 纯函数，不碰 DOM，方便单元测试。
 
 import { effectiveRemind, fmtDuration, pad2 } from './util.js';
+import { getLang } from './i18n.js';
 
-const PRODID = '-//Pixel Notes//Pixel Notes 1.1//ZH';
+const PRODID = '-//Pixel Notes//Pixel Notes 1.5//ZH';
 
-const CATEGORY_LABEL = {
-  work: '工作',
-  life: '生活',
-  study: '学习',
-  other: '其他',
-};
+const CATEGORY_LABEL_EN = { work: 'Work', life: 'Life', study: 'Study', other: 'Other' };
+const CATEGORY_LABEL_ZH = { work: '工作', life: '生活', study: '學習', other: '其他' };
+
+function categoryLabel(cat) {
+  const map = getLang() === 'zh-Hant' ? CATEGORY_LABEL_ZH : CATEGORY_LABEL_EN;
+  return map[cat] || map.other;
+}
 
 /** 毫秒 → iCalendar UTC 时间（20261101T090000Z） */
 export function utcStamp(ms) {
@@ -56,12 +58,13 @@ export function foldLine(line) {
 }
 
 function eventLines(task, now) {
-  const title = task.title || '未命名任务';
-  const category = CATEGORY_LABEL[task.cat] || CATEGORY_LABEL.other;
+  const title = task.title || 'Untitled task';
+  const category = categoryLabel(task.cat);
+  const zh = getLang() === 'zh-Hant';
   const description = [
-    `分类：${category}`,
-    `时长：${fmtDuration((task.endAt - task.startAt) / 60000)}`,
-    '由 Pixel Notes 导出',
+    zh ? `分類：${category}` : `Category: ${category}`,
+    zh ? `時長：${fmtDuration((task.endAt - task.startAt) / 60000)}` : `Duration: ${fmtDuration((task.endAt - task.startAt) / 60000)}`,
+    zh ? '由 Pixel Notes 匯出' : 'Exported from Pixel Notes',
   ].join('\n');
 
   const lines = [

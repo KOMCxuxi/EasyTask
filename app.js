@@ -2,6 +2,7 @@
 // 纯前端、离线优先：资料全部存在 IndexedDB，附件存 blob，不需要任何伺服器。
 
 import { db } from './db.js';
+import { getLang, initLang, isZh, LANGS, setLang, tl, translateDom, translateText } from './i18n.js';
 import { buildICS, icsFilename } from './ics.js';
 import { renderMarkdown } from './md.js';
 import { htmlToMarkdown, htmlToText, isEmptyHtml, sanitizeHtml } from './richtext.js';
@@ -30,6 +31,7 @@ import {
   toDateValue,
   toTimeValue,
   uid,
+  weekHeader,
 } from './util.js';
 
 const MARK_SVG = `<svg class="mark" viewBox="0 0 16 16" width="44" height="44" aria-hidden="true" focusable="false" shape-rendering="crispEdges">
@@ -101,6 +103,8 @@ const state = {
   selectedDay: startOfDay(Date.now()),
   filter: 'all',
   query: { tasks: '', notes: '' },
+  projectFilter: 'all',
+  projectsSorting: false,
   editingNoteId: null,
   theme: 'auto',
   urls: [],
@@ -110,6 +114,7 @@ const state = {
 let modalStack = [];
 let noteSaveTimer = null;
 let dictation = null;
+let projectDrag = null;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -165,8 +170,9 @@ function updateThemeButton() {
   if (!button) return;
   const icons = { auto: '◐', light: '☀', dark: '☾' };
   button.textContent = icons[state.theme] || '◐';
-  button.setAttribute('aria-label', `主题：${THEME_LABEL[state.theme]}（点击切换）`);
-  button.title = `主题：${THEME_LABEL[state.theme]}（点击切换）`;
+  const label = tl('主题：{name}（点击切换）', { name: tl(THEME_LABEL[state.theme]) });
+  button.setAttribute('aria-label', label);
+  button.title = label;
 }
 
 function cycleTheme() {
@@ -187,7 +193,28 @@ function setTheme(mode) {
    启动
    ========================================================================== */
 
+function applyStaticI18n() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = el.dataset.i18n;
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+    el.title = el.dataset.i18nTitle;
+  });
+  document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
+    el.setAttribute('aria-label', el.dataset.i18nAria);
+  });
+}
+
+function applyLangMeta() {
+  document.documentElement.lang = isZh() ? 'zh-Hant' : 'en';
+  document.title = isZh()
+    ? 'Pixel Notes · 筆記、待辦與日曆'
+    : 'Pixel Notes · Notes, Tasks & Calendar';
+}
+
 async function boot() {
+  initLang();
+  applyLangMeta();
   initTheme();
   try {
     await db.init();
@@ -227,7 +254,9 @@ async function loadData() {
   state.tasks = tasks || [];
   state.notes = notes || [];
   state.files = files || [];
-  state.projects = (projects || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  state.projects = (projects || []).sort(
+    (a, b) => (a.sort ?? a.createdAt ?? 0) - (b.sort ?? b.createdAt ?? 0)
+  );
   state.folders = (folders || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
 }
 
@@ -235,6 +264,7 @@ async function loadData() {
 async function seedIfNeeded() {
   if (await db.metaGet('seeded')) return;
 
+  const T = (enText, zhText) => (isZh() ? zhText : enText);
   const today = startOfDay(Date.now());
   const at = (dayOffset, hour, minute) => {
     const d = addDays(today, dayOffset);
@@ -243,46 +273,55 @@ async function seedIfNeeded() {
   };
   const now = Date.now();
 
-  const p1 = { id: uid(), name: '工作', color: 'blue', createdAt: now, updatedAt: now };
-  const p2 = { id: uid(), name: '生活', color: 'green', createdAt: now, updatedAt: now };
-  const p3 = { id: uid(), name: '学习', color: 'yellow', createdAt: now, updatedAt: now };
+  const p1 = { id: uid(), name: T('Work', '工作'), color: 'blue', sort: 0, createdAt: now, updatedAt: now };
+  const p2 = { id: uid(), name: T('Home', '生活'), color: 'green', sort: 10, createdAt: now, updatedAt: now };
+  const p3 = { id: uid(), name: T('Study', '學習'), color: 'yellow', sort: 20, createdAt: now, updatedAt: now };
 
-  const f1 = { id: uid(), name: '灵感', createdAt: now, updatedAt: now };
-  const f2 = { id: uid(), name: '工作笔记', createdAt: now, updatedAt: now };
+  const f1 = { id: uid(), name: T('Ideas', '靈感'), createdAt: now, updatedAt: now };
+  const f2 = { id: uid(), name: T('Work notes', '工作筆記'), createdAt: now, updatedAt: now };
 
   const t1 = {
-    id: uid(), title: '欢迎使用：点开这个任务',
+    id: uid(), title: T('Welcome: open this task', '歡迎使用：點開這個任務'),
     startAt: at(0, 9, 0), endAt: at(0, 10, 0),
     cat: 'work', projectId: p1.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const t2 = {
-    id: uid(), title: '整理这周的待办',
+    id: uid(), title: T('Tidy this week’s tasks', '整理這週的待辦'),
     startAt: at(0, 14, 0), endAt: at(0, 15, 30),
     cat: 'life', projectId: p2.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const t3 = {
-    id: uid(), title: '周末采购清单',
+    id: uid(), title: T('Weekend shopping list', '週末採購清單'),
     startAt: at(1, 11, 0), endAt: at(1, 12, 0),
     cat: 'other', projectId: p2.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const t4 = {
-    id: uid(), title: '读 30 分钟书',
+    id: uid(), title: T('Read for 30 minutes', '讀 30 分鐘書'),
     startAt: at(1, 20, 0), endAt: at(1, 20, 30),
     cat: 'study', projectId: p3.id, done: 0, remind: 10, createdAt: now, updatedAt: now,
   };
   const n1 = {
-    id: uid(), taskId: t1.id, folderId: null, title: '这个任务里的笔记',
-    body: '每个任务都能有自己的笔记和附件。\n\n点「＋ 任务笔记」再写一则；点「＋ 附件」把照片或文件放进来。\n资料只存在这台装置，记得偶尔到设置里汇出备份。',
+    id: uid(), taskId: t1.id, folderId: null, title: T('Note inside this task', '這個任務裡的筆記'),
+    body: T(
+      'Every task can have its own notes and attachments.\n\nTap “+ Task note” to add another note, or “+ Attachments” to attach files.\nEverything stays on this device — remember to export a backup now and then.',
+      '每個任務都能有自己的筆記和附件。\n\n點「＋ 任務筆記」再寫一則；點「＋ 附件」把照片或檔案放進來。\n資料只存在這台裝置，記得偶爾到設定裡匯出備份。'
+    ),
     pinned: 0, createdAt: now, updatedAt: now,
   };
   const n2 = {
-    id: uid(), taskId: null, folderId: f1.id, title: '灵感速记',
-    body: '独立备忘录放在这里：\n- 想看的书\n- 想买的东西\n- 随手记下的一句话',
+    id: uid(), taskId: null, folderId: f1.id, title: T('Quick ideas', '靈感速記'),
+    body: T(
+      'Standalone notes live here:\n- Books to read\n- Things to buy\n- A sentence to remember',
+      '獨立備忘錄放在這裡：\n- 想看的書\n- 想買的東西\n- 隨手記下的一句話'
+    ),
     pinned: 1, createdAt: now, updatedAt: now,
   };
   const n3 = {
-    id: uid(), taskId: null, folderId: f2.id, title: '本周复盘',
-    body: '# 本周复盘\n\n先写下三件做得好的事，再写两件想改进的事。\n\n| 项目 | 状况 | 备注 |\n| --- | --- | --- |\n| 专案 A | 进行中 | 下周三检查 |\n| 专案 B | 已完成 | 待归档 |',
+    id: uid(), taskId: null, folderId: f2.id, title: T('Weekly review', '本週復盤'),
+    body: T(
+      '# Weekly review\n\nWrite down three things that went well, then two to improve.\n\n| Item | Status | Notes |\n| --- | --- | --- |\n| Project A | In progress | Check next Wednesday |\n| Project B | Done | Archive it |',
+      '# 本週復盤\n\n先寫下三件做得好的事，再寫兩件想改進的事。\n\n| 項目 | 狀況 | 備註 |\n| --- | --- | --- |\n| 專案 A | 進行中 | 下週三檢查 |\n| 專案 B | 已完成 | 待歸檔 |'
+    ),
     pinned: 0, createdAt: now, updatedAt: now,
   };
 
@@ -446,11 +485,14 @@ async function render(opts = {}) {
     fab.hidden = !entry;
     if (entry) {
       fab.dataset.act = entry[0];
-      fab.setAttribute('aria-label', entry[1]);
+      fab.setAttribute('aria-label', tl(entry[1]));
     }
   }
 
   postRender(viewRoute);
+
+  applyStaticI18n();
+  translateDom(document.body);
 
   if (route.name === 'new') {
     const preset = presetFromParams(route.params);
@@ -473,7 +515,7 @@ function postRender(route) {
     if (!note) return;
     state.editingNoteId = note.id;
     updateEditorFoot(note);
-    setSaveState('✓ 已储存');
+    setSaveState('已储存');
     if (!note.title && !note.body) {
       const editor = document.getElementById('note-body');
       if (editor) setTimeout(() => editor.focus({ preventScroll: true }), 90);
@@ -528,36 +570,60 @@ function tasksForProject(projectId) {
 }
 
 function taskSummary(list) {
-  return `${list.length} 项 · ${list.filter((t) => !t.done).length} 项未完成`;
+  return tl('{n} 项 · {m} 项未完成', {
+    n: list.length,
+    m: list.filter((t) => !t.done).length,
+  });
+}
+
+function filterTasksByProject(list) {
+  if (state.projectFilter === 'all') return list;
+  if (state.projectFilter === 'none') return list.filter((t) => !t.projectId);
+  return list.filter((t) => t.projectId === state.projectFilter);
 }
 
 function renderTaskHome() {
   const tasks = state.tasks;
   const inbox = tasks.filter((t) => !t.projectId);
   const overdue = tasks.filter((t) => isOverdue(t));
-  const cards = state.projects.map((project) => projectCardHTML(project)).join('');
+  const active = state.projects.filter((project) => !project.archived);
+  const archived = state.projects.filter((project) => project.archived);
+  const cards = active.map((project) => projectCardHTML(project)).join('');
   const inboxCard = inbox.length
     ? projectCardHTML({ id: null, name: '未分类', color: null })
     : '';
+  const archivedCards = archived.map((project) => projectCardHTML(project)).join('');
 
   return `<section class="page">
     <div class="page-head">
       <div>
         <h1>待办</h1>
-        <p class="sub">${tasks.length} 项 · ${tasks.filter((t) => !t.done).length} 项未完成</p>
+        <p class="sub">${esc(taskSummary(tasks))}</p>
       </div>
       <div class="head-actions">
+        ${state.projects.length
+          ? `<button class="btn" type="button" data-act="toggle-project-sort">${state.projectsSorting ? '完成' : '排序'}</button>`
+          : ''}
         <button class="btn" type="button" data-act="go-all">全部任务</button>
         <button class="btn btn-primary" type="button" data-act="new-project">＋ 新专案</button>
       </div>
     </div>
     ${installHintHTML()}
+    ${state.projectsSorting
+      ? '<p class="hint sort-hint">按住卡片拖动排序，或用卡片上的 ↑ ↓ 调整；排好后按「完成」。</p>'
+      : ''}
     ${overdue.length
-      ? `<div class="overdue-banner"><span>有 ${overdue.length} 个逾期任务</span><button class="btn tiny btn-danger" type="button" data-act="go-all">去处理</button></div>`
+      ? `<div class="overdue-banner"><span>${tl('有 {n} 个逾期任务', { n: overdue.length })}</span><button class="btn tiny btn-danger" type="button" data-act="go-all">去处理</button></div>`
       : ''}
     ${cards || inboxCard
-      ? `<div class="project-grid">${cards}${inboxCard}</div>`
+      ? `<div class="project-grid sort-grid">${cards}${inboxCard}</div>`
       : emptyState('还没有专案', '按「＋ 新专案」建立第一个专案，再把任务放进去。')}
+    ${archivedCards
+      ? `<div class="group archived-group">
+        <div class="group-head"><span>已封存</span><span class="line"></span><span class="count">${archived.length}</span></div>
+        <div class="project-grid archived-grid">${archivedCards}</div>
+      </div>`
+      : ''}
   </section>`;
 }
 
@@ -567,18 +633,40 @@ function projectCardHTML(project) {
   const next = list.filter((t) => !t.done).sort((a, b) => a.startAt - b.startAt)[0];
   const nextText = next ? `${relDayLabel(next.startAt)} ${fmtTime(next.startAt)} · ${next.title}` : '没有待办任务';
   const color = projectColor(project);
-  return `<a class="project-card" href="#/project/${project.id || 'inbox'}" style="--c:${color}">
-    <div class="pc-head"><span class="pc-name">${esc(project.name)}</span><span class="pc-count">${undone}/${list.length}</span></div>
-    <div class="pc-next">${esc(nextText)}</div>
-  </a>`;
+  const canSort = state.projectsSorting && project.id;
+  const sortControls = canSort
+    ? `<div class="pc-sort">
+        <button class="pc-sort-btn" type="button" data-act="move-project" data-id="${project.id}" data-dir="-1" aria-label="上移">↑</button>
+        <button class="pc-sort-btn" type="button" data-act="move-project" data-id="${project.id}" data-dir="1" aria-label="下移">↓</button>
+      </div>`
+    : '';
+  return `<div class="project-card ${project.archived ? 'archived' : ''} ${state.projectsSorting ? 'sorting' : ''}" ${project.id ? `data-project-id="${project.id}"` : ''} data-act="open-project" data-id="${project.id || ''}" role="link" tabindex="0" style="--c:${color}">
+    <a class="pc-link" href="#/project/${project.id || 'inbox'}" ${state.projectsSorting ? 'tabindex="-1"' : ''}>
+      <div class="pc-head"><span class="pc-name" data-raw>${esc(project.name)}</span><span class="pc-count">${undone}/${list.length}</span></div>
+      <div class="pc-next" data-raw>${esc(nextText)}</div>
+    </a>
+    ${sortControls}
+  </div>`;
 }
 
 function renderAllTasks() {
+  const filtered = filterTasksByProject(state.tasks);
+  const projectChips = [
+    ['all', '全部专案'],
+    ...state.projects.map((project) => [project.id, project.name]),
+    ['none', '未分类'],
+  ]
+    .map(
+      ([value, label]) =>
+        `<button class="chip ${state.projectFilter === value ? 'on' : ''}" type="button" data-act="project-filter" data-project="${value}">${esc(label)}</button>`
+    )
+    .join('');
+
   return `<section class="page">
     <div class="page-head">
       <div>
         <h1>全部任务</h1>
-        <p class="sub" id="task-sub">${esc(taskSummary(state.tasks))}</p>
+        <p class="sub" id="task-sub">${esc(taskSummary(filtered))}</p>
       </div>
       <div class="head-actions">
         <button class="btn" type="button" data-act="go-tasks">‹ 专案</button>
@@ -593,8 +681,9 @@ function renderAllTasks() {
       <div class="chips">
         ${FILTERS.map(([key, label]) => `<button class="chip ${state.filter === key ? 'on' : ''}" type="button" data-act="filter" data-filter="${key}">${label}</button>`).join('')}
       </div>
+      <div class="chips project-filter">${projectChips}</div>
     </div>
-    <div id="task-list">${taskListHTML(state.tasks, { showProject: true })}</div>
+    <div id="task-list">${taskListHTML(filtered, { showProject: true })}</div>
   </section>`;
 }
 
@@ -608,15 +697,17 @@ function renderProjectPage(id) {
   return `<section class="page">
     <div class="detail-top">
       <button class="btn tiny" type="button" data-act="go-tasks">‹ 专案</button>
-      <span class="badge" style="border-color:${color}">${esc(name)}</span>
+      <span class="badge" style="border-color:${color}" data-raw>${esc(name)}</span>
+      ${project && project.archived ? '<span class="badge">已封存</span>' : ''}
     </div>
     <div class="page-head">
       <div>
-        <h1>${esc(name)}</h1>
+        <h1 data-raw>${esc(name)}</h1>
         <p class="sub" id="task-sub">${esc(taskSummary(list))}</p>
       </div>
       <div class="head-actions">
         ${project ? `<button class="btn" type="button" data-act="edit-project" data-id="${project.id}">编辑</button>` : ''}
+        ${project ? `<button class="btn" type="button" data-act="toggle-archive" data-id="${project.id}">${project.archived ? '取消封存' : '封存'}</button>` : ''}
         ${project ? `<button class="btn btn-danger" type="button" data-act="delete-project" data-id="${project.id}">删除</button>` : ''}
         <button class="btn btn-primary" type="button" data-act="new-task">＋ 新任务</button>
       </div>
@@ -739,7 +830,7 @@ function taskRowHTML(task, noteCount, fileCount, opts = {}) {
   const accent = project ? projectColor(project) : c.color;
   const overdue = isOverdue(task);
   const projectChip = opts.showProject
-    ? `<span class="badge proj-badge">${esc(project ? project.name : '未分类')}</span>`
+    ? `<span class="badge proj-badge" data-raw>${esc(project ? project.name : '未分类')}</span>`
     : '';
   const trailing = opts.quickDelete
     ? `<button class="row-del" type="button" data-act="delete-task-quick" data-id="${task.id}" aria-label="删除任务" title="删除任务">×</button>`
@@ -747,14 +838,14 @@ function taskRowHTML(task, noteCount, fileCount, opts = {}) {
   return `<div class="task-row ${task.done ? 'done' : ''}" style="--c:${accent}" data-act="open-task" data-id="${task.id}" role="button" tabindex="0">
     <button class="check ${task.done ? 'on' : ''}" type="button" data-act="toggle-task" data-id="${task.id}" aria-label="${task.done ? '标记为未完成' : '标记为完成'}">✓</button>
     <div class="t-body">
-      <div class="t-title">${esc(task.title)}</div>
+      <div class="t-title" data-raw>${esc(task.title)}</div>
       <div class="t-meta">
         <span class="dot" style="--c:${c.color}"></span>
         <span class="mono">${esc(fmtRange(task.startAt, task.endAt))}</span>
         ${opts.showProject ? projectChip : `<span class="dim">${esc(c.label)}</span>`}
         ${overdue ? '<span class="badge warn">逾期</span>' : ''}
-        ${fileCount[task.id] ? `<span class="badge">附件 ${fileCount[task.id]}</span>` : ''}
-        ${noteCount[task.id] ? `<span class="badge">笔记 ${noteCount[task.id]}</span>` : ''}
+        ${fileCount[task.id] ? `<span class="badge">${tl('附件 {n}', { n: fileCount[task.id] })}</span>` : ''}
+        ${noteCount[task.id] ? `<span class="badge">${tl('笔记 {n}', { n: noteCount[task.id] })}</span>` : ''}
       </div>
     </div>
     ${trailing}
@@ -772,6 +863,8 @@ function updateTaskList() {
     options = { showProject: false, applyQuery: false };
   } else if (route.name !== 'all') {
     return;
+  } else {
+    tasks = filterTasksByProject(state.tasks);
   }
   list.innerHTML = taskListHTML(tasks, options);
   const sub = document.getElementById('task-sub');
@@ -796,7 +889,7 @@ function renderCalendar() {
     byDay.get(key).push(t);
   }
 
-  const weekHead = ['一', '二', '三', '四', '五', '六', '日']
+  const weekHead = weekHeader()
     .map((w) => `<div class="cal-w">${w}</div>`)
     .join('');
 
@@ -824,7 +917,7 @@ function renderCalendar() {
     <div class="page-head">
       <div>
         <h1>日历</h1>
-        <p class="sub">${esc(fmtDateCN(state.selectedDay))} · ${dayTasks.length} 项</p>
+        <p class="sub">${esc(fmtDateCN(state.selectedDay))} · ${tl('{n} 项', { n: dayTasks.length })}</p>
       </div>
       <div class="head-actions">
         <button class="btn" type="button" data-act="export-day-ics">导出这天</button>
@@ -852,7 +945,7 @@ function agendaRowHTML(task) {
   return `<button class="agenda-row ${task.done ? 'done' : ''}" type="button" data-act="open-task" data-id="${task.id}">
     <span class="agenda-time">${esc(fmtTime(task.startAt))}</span>
     <span class="dot" style="--c:${catOf(task.cat).color}"></span>
-    <span class="agenda-title">${esc(task.title)}</span>
+    <span class="agenda-title" data-raw>${esc(task.title)}</span>
     <span class="chev" aria-hidden="true">›</span>
   </button>`;
 }
@@ -904,7 +997,7 @@ function renderNotesHome() {
     <div class="page-head">
       <div>
         <h1>备忘</h1>
-        <p class="sub">${notes.length} 则 · ${state.folders.length} 个资料夹</p>
+        <p class="sub">${tl('{n} 则 · {m} 个资料夹', { n: notes.length, m: state.folders.length })}</p>
       </div>
       <div class="head-actions">
         <button class="btn" type="button" data-act="go-allnotes">全部笔记</button>
@@ -925,7 +1018,7 @@ function folderCardHTML(folder, index) {
     ? PROJECT_COLORS[index % PROJECT_COLORS.length].color
     : '#6d6857';
   return `<a class="project-card folder-card" href="#/folder/${folder.id || 'inbox'}" style="--c:${color}">
-    <div class="pc-head"><span class="pc-name">${esc(folder.name)}</span><span class="pc-count">${list.length} 则</span></div>
+    <div class="pc-head"><span class="pc-name" data-raw>${esc(folder.name)}</span><span class="pc-count">${list.length}</span></div>
     <div class="pc-next">${updated ? esc(fmtUpdated(updated)) : '还没有笔记'}</div>
   </a>`;
 }
@@ -936,7 +1029,7 @@ function renderAllNotes() {
     <div class="page-head">
       <div>
         <h1>全部笔记</h1>
-        <p class="sub" id="note-sub">${notes.length} 则</p>
+        <p class="sub" id="note-sub">${tl('{n} 则', { n: notes.length })}</p>
       </div>
       <div class="head-actions">
         <button class="btn" type="button" data-act="go-notes">‹ 资料夹</button>
@@ -970,8 +1063,8 @@ function renderFolderPage(id) {
     </div>
     <div class="page-head">
       <div>
-        <h1>${esc(name)}</h1>
-        <p class="sub" id="note-sub">${list.length} 则</p>
+        <h1 data-raw>${esc(name)}</h1>
+        <p class="sub" id="note-sub">${tl('{n} 则', { n: list.length })}</p>
       </div>
     </div>
     <div id="note-list">${noteListHTML(list, { showFolder: false, applyQuery: false })}</div>
@@ -1013,11 +1106,11 @@ function noteRowHTML(note, opts = {}) {
   return `<div class="note-row" role="button" tabindex="0" data-act="open-note" data-id="${note.id}">
     <div class="note-row-main">
       <div class="note-row-head">
-        <span class="n-title">${esc(note.title || '无标题笔记')}</span>
+        ${note.title ? `<span class="n-title" data-raw>${esc(note.title)}</span>` : '<span class="n-title">无标题笔记</span>'}
         ${showPin && note.pinned ? '<span class="badge">置顶</span>' : ''}
         ${folderBadge}
       </div>
-      <div class="n-prev">${esc(notePreview(note))}</div>
+      <div class="n-prev" data-raw>${esc(notePreview(note))}</div>
       <div class="n-time">${esc(fmtUpdated(note.updatedAt))}</div>
     </div>
     <button class="row-export" type="button" data-act="export-note" data-id="${note.id}" title="汇出笔记" aria-label="汇出笔记">⇩</button>
@@ -1109,7 +1202,7 @@ function renderNoteEditor(id) {
     <div class="editor-bar">
       <button class="btn tiny" type="button" data-act="${backAct}">${backLabel}</button>
       <span class="spacer"></span>
-      ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="move-note" data-id="${note.id}" title="移动到资料夹">📁 ${esc(folder ? folder.name : '未分类')}</button>`}
+      ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="move-note" data-id="${note.id}" title="移动到资料夹">📁 ${folder ? `<span data-raw>${esc(folder.name)}</span>` : '<span>未分类</span>'}</button>`}
       <button class="btn tiny" type="button" data-act="export-note" data-id="${note.id}">⇩ 汇出</button>
       ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="toggle-pin" data-id="${note.id}">${note.pinned ? '取消置顶' : '置顶'}</button>`}
       <button class="btn tiny btn-danger" type="button" data-act="delete-note" data-id="${note.id}">删除</button>
@@ -1136,11 +1229,11 @@ function renderNoteEditor(id) {
     <input id="note-title" class="note-title" type="text" placeholder="标题" value="${esc(note.title)}" autocomplete="off">
     <div id="note-body" class="note-body rich-content" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="开始输入…">${initialHtml}</div>
     <div class="editor-foot">
-      <span id="note-count">${charCount(note.body)} 字</span>
-      <span class="save-state" id="save-state">已储存</span>
+      <span id="note-count">${tl('{n} 字', { n: charCount(note.body) })}</span>
+      <span class="save-state" id="save-state">${tl('已储存')}</span>
       <div class="foot-right">
         <span class="md-hint">${isIOS() ? '语音：用键盘 🎤 听写' : '支援表格、清单与粗体'}</span>
-        <span id="note-updated">更新于 ${esc(fmtUpdated(note.updatedAt))}</span>
+        <span id="note-updated">${tl('更新于 {time}', { time: fmtUpdated(note.updatedAt) })}</span>
       </div>
     </div>
   </section>`;
@@ -1372,14 +1465,14 @@ function dictateNote(button) {
 
 function setSaveState(text) {
   const el = document.getElementById('save-state');
-  if (el) el.textContent = text;
+  if (el) el.textContent = translateText(text);
 }
 
 function updateEditorFoot(note) {
   const count = document.getElementById('note-count');
   const updated = document.getElementById('note-updated');
-  if (count) count.textContent = `${charCount(note.body)} 字`;
-  if (updated) updated.textContent = `更新于 ${fmtUpdated(note.updatedAt)}`;
+  if (count) count.textContent = tl('{n} 字', { n: charCount(note.body) });
+  if (updated) updated.textContent = tl('更新于 {time}', { time: fmtUpdated(note.updatedAt) });
 }
 
 function scheduleNoteSave() {
@@ -1414,13 +1507,13 @@ async function saveNoteNow() {
     }
   }
   if (!changed) {
-    setSaveState('✓ 已储存');
+    setSaveState('已储存');
     return;
   }
   note.updatedAt = Date.now();
   try {
     await db.notePut(note);
-    setSaveState('✓ 已储存');
+    setSaveState('已储存');
     updateEditorFoot(note);
   } catch (err) {
     console.error(err);
@@ -1531,10 +1624,10 @@ async function renderTaskDetail(id) {
       <a class="btn tiny" href="${backHash}">‹ ${project ? esc(project.name) : '专案'}</a>
       <span class="badge ${task.done ? 'ok' : ''}">${task.done ? '已完成' : '进行中'}</span>
     </div>
-    <h1 class="detail-title ${task.done ? 'done' : ''}">${esc(task.title)}</h1>
+    <h1 class="detail-title ${task.done ? 'done' : ''}" data-raw>${esc(task.title)}</h1>
     <div class="chips meta-chips">
       <span class="chip static"><span class="dot" style="--c:${c.color}"></span>${esc(c.label)}</span>
-      <a class="chip" href="${project ? `#/project/${encodeURIComponent(project.id)}` : '#/project/inbox'}">📁 ${esc(project ? project.name : '未分类')}</a>
+      <a class="chip" href="${project ? `#/project/${encodeURIComponent(project.id)}` : '#/project/inbox'}" data-raw>📁 ${esc(project ? project.name : '未分类')}</a>
       <span class="chip static">${esc(fmtDateCN(task.startAt))}</span>
       <span class="chip static mono">${esc(fmtRange(task.startAt, task.endAt))}</span>
       <span class="chip static">${esc(fmtDuration((task.endAt - task.startAt) / 60000))}</span>
@@ -1561,7 +1654,7 @@ async function renderTaskDetail(id) {
 
     <section class="panel danger">
       <div class="panel-head"><h2>危险区</h2></div>
-      <p class="hint" style="margin-bottom:10px">删除任务会一并删除它的 ${notes.length} 则笔记和 ${files.length} 个附件，无法还原。</p>
+      <p class="hint" style="margin-bottom:10px">${tl('删除任务会一并删除它的 {notes} 则笔记和 {files} 个附件，无法还原。', { notes: notes.length, files: files.length })}</p>
       <button class="btn btn-danger" type="button" data-act="delete-task" data-id="${task.id}">删除这个任务</button>
     </section>
   </section>`;
@@ -1576,7 +1669,7 @@ function fileItemHTML(meta, url) {
       ${url ? `<img src="${url}" alt="">` : `<span class="file-ext">${esc(ext.slice(0, 4))}</span>`}
     </div>
     <div class="f-meta">
-      <div class="f-name" title="${esc(meta.name)}">${esc(meta.name)}</div>
+      <div class="f-name" title="${esc(meta.name)}" data-raw>${esc(meta.name)}</div>
       <div class="f-size">${esc(humanSize(meta.size))}</div>
     </div>
     <div class="f-actions">
@@ -1818,6 +1911,74 @@ async function deleteProjectFlow(id) {
   else await render({ scroll: false });
 }
 
+async function toggleArchive(id) {
+  const project = projectById(id);
+  if (!project) return;
+  project.archived = project.archived ? 0 : 1;
+  project.updatedAt = Date.now();
+  try {
+    await db.projectPut(project);
+  } catch (err) {
+    toast('储存失败：' + err.message);
+    return;
+  }
+  toast(project.archived ? '已封存专案' : '已取消封存');
+  await render({ scroll: false });
+}
+
+function toggleProjectSort() {
+  state.projectsSorting = !state.projectsSorting;
+  render({ scroll: false });
+}
+
+async function persistProjectOrder(activeList) {
+  for (let i = 0; i < activeList.length; i += 1) {
+    const project = activeList[i];
+    project.sort = i * 10;
+    project.updatedAt = Date.now();
+    await db.projectPut(project);
+  }
+  const archived = state.projects.filter((p) => p.archived);
+  state.projects = [...activeList, ...archived];
+}
+
+async function moveProject(id, dir) {
+  const active = state.projects.filter((project) => !project.archived);
+  const index = active.findIndex((project) => project.id === id);
+  const target = index + Number(dir);
+  if (index < 0 || target < 0 || target >= active.length) return;
+  const reordered = active.slice();
+  const [item] = reordered.splice(index, 1);
+  reordered.splice(target, 0, item);
+  try {
+    await persistProjectOrder(reordered);
+  } catch (err) {
+    toast('储存失败：' + err.message);
+    return;
+  }
+  await render({ scroll: false });
+}
+
+async function saveProjectOrderFromDom() {
+  const grid = document.querySelector('.sort-grid');
+  if (!grid) return;
+  const ids = Array.from(grid.querySelectorAll('.project-card[data-project-id]')).map(
+    (element) => element.dataset.projectId
+  );
+  const active = ids.map((id) => projectById(id)).filter(Boolean);
+  if (active.length < 2) return;
+  try {
+    await persistProjectOrder(active);
+  } catch (err) {
+    toast('储存失败：' + err.message);
+  }
+}
+
+function setProjectFilter(value) {
+  state.projectFilter = value || 'all';
+  render({ scroll: false });
+}
+
 /* ==========================================================================
    笔记资料夹
    ========================================================================== */
@@ -1925,7 +2086,7 @@ function openMoveNoteModal(noteId) {
     .concat(
       state.folders.map(
         (folder) =>
-          `<button class="move-row ${note.folderId === folder.id ? 'on' : ''}" type="button" data-act="move-note-to" data-id="${note.id}" data-folder="${folder.id}">${esc(folder.name)}</button>`
+          `<button class="move-row ${note.folderId === folder.id ? 'on' : ''}" type="button" data-act="move-note-to" data-id="${note.id}" data-folder="${folder.id}" data-raw>${esc(folder.name)}</button>`
       )
     )
     .join('');
@@ -2029,7 +2190,7 @@ function openExportNoteModal(noteId) {
       <h2>汇出笔记</h2>
       <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
     </div>
-    <p class="hint" style="margin-bottom:12px">「${esc(note.title || '无标题笔记')}」会下载到「文件」App。</p>
+    <p class="hint" style="margin-bottom:12px">${tl('「{title}」会下载到「文件」App。', { title: note.title || '无标题笔记' })}</p>
     <div class="export-list">
       <button class="export-row" type="button" data-act="export-note-format" data-id="${note.id}" data-format="md">
         <strong>Markdown (.md)</strong><span>保留标题、清单与表格，方便搬到别的笔记软体</span>
@@ -2040,7 +2201,41 @@ function openExportNoteModal(noteId) {
       <button class="export-row" type="button" data-act="export-note-format" data-id="${note.id}" data-format="html">
         <strong>网页 (.html)</strong><span>保留格式，可用浏览器打开或印成 PDF</span>
       </button>
+      <button class="export-row" type="button" data-act="export-note-format" data-id="${note.id}" data-format="pdf">
+        <strong>PDF（列印 / 存到文件）</strong><span>打开系统列印对话框，可存成 PDF 或直接印出来</span>
+      </button>
     </div>`);
+}
+
+function printNote(note) {
+  const title = note.title || '无标题笔记';
+  const html = note.html ? sanitizeHtml(note.html) : renderMarkdown(note.body || '');
+  const printRoot = document.getElementById('print-root');
+  if (!printRoot) return;
+
+  printRoot.innerHTML = `<article class="print-note"><h1>${esc(title)}</h1>${html}</article>`;
+  document.body.classList.add('printing');
+  closeTopModal();
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    document.body.classList.remove('printing');
+    printRoot.innerHTML = '';
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  setTimeout(cleanup, 60000);
+
+  setTimeout(() => {
+    try {
+      window.print();
+    } catch (err) {
+      cleanup();
+      toast('这个浏览器不支持列印，请改用 HTML 汇出');
+    }
+  }, 120);
 }
 
 function exportNoteFormat(noteId, format) {
@@ -2120,7 +2315,7 @@ function openTaskModal(task, preset = {}) {
     .concat(
       state.projects.map(
         (project) =>
-          `<option value="${project.id}" ${project.id === currentProjectId ? 'selected' : ''}>${esc(project.name)}</option>`
+          `<option value="${project.id}" data-raw ${project.id === currentProjectId ? 'selected' : ''}>${esc(project.name)}</option>`
       )
     )
     .join('');
@@ -2147,7 +2342,7 @@ function openTaskModal(task, preset = {}) {
           <input id="f-end" type="time" value="${toTimeValue(endAt)}">
         </label>
       </div>
-      <div class="dur-line"><span id="f-dur">时长 ${esc(fmtDuration((endAt - startAt) / 60000))}</span><span class="warn-text" id="f-warn"></span></div>
+      <div class="dur-line"><span id="f-dur">${tl('时长 {value}', { value: fmtDuration((endAt - startAt) / 60000) })}</span><span class="warn-text" id="f-warn"></span></div>
       <div class="dur-chips">
         <button class="btn tiny" type="button" data-act="set-dur" data-dur="30">30 分</button>
         <button class="btn tiny" type="button" data-act="set-dur" data-dur="60">1 小时</button>
@@ -2193,7 +2388,7 @@ function syncTaskForm(modal) {
   const start = parseLocal(date, startTime);
   const end = parseLocal(date, endTime);
   if (!start || !end) {
-    durEl.textContent = '时长 —';
+    durEl.textContent = tl('时长 —');
     if (warnEl) warnEl.textContent = '';
     return;
   }
@@ -2204,7 +2399,7 @@ function syncTaskForm(modal) {
   } else if (warnEl) {
     warnEl.textContent = '';
   }
-  durEl.textContent = `时长 ${fmtDuration(minutes)}`;
+  durEl.textContent = tl('时长 {value}', { value: fmtDuration(minutes) });
 }
 
 function setDurationFromChip(button) {
@@ -2422,6 +2617,7 @@ function openModal(html, opts = {}) {
     if (event.target === overlay) close();
   });
   modalStack.push(close);
+  translateDom(overlay);
 
   if (opts.focus) {
     setTimeout(() => {
@@ -2450,8 +2646,8 @@ function confirmDialog(opts = {}) {
   return new Promise((resolve) => {
     let done = false;
     const m = openModal(`
-      <div class="modal-head"><h2>${esc(title)}</h2></div>
-      <p class="hint" style="margin-bottom:14px">${esc(message)}</p>
+      <div class="modal-head"><h2>${esc(translateText(title))}</h2></div>
+      <p class="hint" style="margin-bottom:14px">${esc(translateText(message))}</p>
       <div class="modal-actions">
         <button class="btn" type="button" data-confirm="0">${esc(cancelText)}</button>
         <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" type="button" data-confirm="1">${esc(confirmText)}</button>
@@ -2500,6 +2696,16 @@ function openSettings() {
     </section>
 
     <section class="set-block">
+      <h3>语言</h3>
+      <div class="chips">
+        ${LANGS.map(
+          ([value, label]) =>
+            `<button class="chip ${getLang() === value ? 'on' : ''}" type="button" data-act="set-lang" data-lang="${value}">${label}</button>`
+        ).join('')}
+      </div>
+    </section>
+
+    <section class="set-block">
       <h3>储存</h3>
       <p class="hint" id="storage-info">读取中…</p>
       <button class="btn" type="button" data-act="persist-storage">申请持久化储存</button>
@@ -2538,7 +2744,7 @@ function openSettings() {
 
     <section class="set-block">
       <h3>应用</h3>
-      <p class="hint">Pixel Notes v1.3 · 离线优先，不需要网络。</p>
+      <p class="hint">Pixel Notes v1.5 · 离线优先，不需要网络。</p>
       <button class="btn" type="button" data-act="force-update">检查更新（清除快取）</button>
     </section>
 
@@ -2563,7 +2769,7 @@ function openSettings() {
 
 function shortcutUrl() {
   const base = `${location.origin}${location.pathname}`;
-  return `${base}#/new?title={标题}&date={YYYY-MM-DD}&start={HH:mm}`;
+  return `${base}#/new?title={title}&date={YYYY-MM-DD}&start={HH:mm}`;
 }
 
 function todayText() {
@@ -2617,6 +2823,7 @@ const DEPLOY_FILES = [
   './ics.js',
   './md.js',
   './richtext.js',
+  './i18n.js',
   './sw.js',
   './manifest.webmanifest',
   './icons/icon-180.png',
@@ -2685,32 +2892,37 @@ async function fillStorageInfo() {
   if (!el) return;
   try {
     if (!navigator.storage || !navigator.storage.estimate) {
-      el.textContent = '这个浏览器不支援储存空间查询。';
+      el.textContent = tl('这个浏览器不支援储存空间查询。');
       return;
     }
     const estimate = await navigator.storage.estimate();
     const usage = estimate.usage || 0;
     const quota = estimate.quota || 0;
     const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : false;
-    el.textContent = `已用 ${humanSize(usage)}${quota ? ` / 可用约 ${humanSize(quota)}` : ''}${persisted ? ' · 已持久化' : ' · 未持久化'}`;
+    const quotaText = quota ? tl(' / 可用约 {q}', { q: humanSize(quota) }) : '';
+    el.textContent = tl('已用 {used}{quota}{persist}', {
+      used: humanSize(usage),
+      quota: quotaText,
+      persist: persisted ? tl(' · 已持久化') : tl(' · 未持久化'),
+    });
   } catch (err) {
-    el.textContent = '无法读取储存资讯。';
+    el.textContent = tl('无法读取储存资讯。');
   }
 }
 
 async function requestPersist() {
   const info = document.getElementById('persist-info');
   if (!navigator.storage || !navigator.storage.persist) {
-    if (info) info.textContent = '这个浏览器不支援持久化储存。';
+    if (info) info.textContent = tl('这个浏览器不支援持久化储存。');
     return;
   }
   try {
     const ok = await navigator.storage.persist();
-    if (info) info.textContent = ok ? '✓ 已获得持久化储存' : '未授予。iOS 上通常要先「加到主画面」再申请。';
-    toast(ok ? '已获得持久化储存' : '未授予持久化储存');
+    if (info) info.textContent = ok ? tl('✓ 已获得持久化储存') : tl('未授予。iOS 上通常要先「加到主画面」再申请。');
+    toast(ok ? tl('已获得持久化储存') : tl('未授予持久化储存'));
     await fillStorageInfo();
   } catch (err) {
-    if (info) info.textContent = '申请失败：' + err.message;
+    if (info) info.textContent = tl('申请失败：{msg}', { msg: err.message });
   }
 }
 
@@ -2895,6 +3107,15 @@ function bindEvents() {
       return;
     }
 
+    // 排序模式：点卡片本体不要进专案（按卡片上的 ↑↓ 才有效）
+    if (state.projectsSorting) {
+      const card = event.target.closest('.project-card');
+      if (card && !event.target.closest('[data-act="move-project"]')) {
+        event.preventDefault();
+        return;
+      }
+    }
+
     const target = event.target.closest('[data-act]');
     if (!target) return;
     if (target.tagName === 'A' && !target.dataset.act) return;
@@ -2904,6 +3125,45 @@ function bindEvents() {
       toast('操作失败：' + err.message);
     });
   });
+
+  // 专案卡片拖动排序（触控 / 滑鼠都支援）
+  document.addEventListener('pointerdown', (event) => {
+    if (!state.projectsSorting) return;
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest('[data-act="move-project"]')) return;
+    const card = event.target.closest('.project-card[data-project-id]');
+    if (!card) return;
+    event.preventDefault();
+    projectDrag = { card, pointerId: event.pointerId };
+    card.classList.add('dragging');
+    try {
+      card.setPointerCapture(event.pointerId);
+    } catch (err) {
+      /* ignore */
+    }
+  });
+
+  document.addEventListener('pointermove', (event) => {
+    if (!projectDrag) return;
+    const grid = projectDrag.card.parentElement;
+    if (!grid) return;
+    event.preventDefault();
+    const target = document.elementFromPoint(event.clientX, event.clientY);
+    const over = target && target.closest ? target.closest('.project-card') : null;
+    if (!over || over === projectDrag.card || over.parentElement !== grid) return;
+    const rect = over.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    grid.insertBefore(projectDrag.card, after ? over.nextSibling : over);
+  });
+
+  const endProjectDrag = () => {
+    if (!projectDrag) return;
+    projectDrag.card.classList.remove('dragging');
+    projectDrag = null;
+    saveProjectOrderFromDom().then(() => render({ scroll: false }));
+  };
+  document.addEventListener('pointerup', endProjectDrag);
+  document.addEventListener('pointercancel', endProjectDrag);
 
   document.addEventListener('selectionchange', () => {
     rememberSelection();
@@ -3013,6 +3273,21 @@ async function onAction(action, el) {
     case 'delete-project':
       await deleteProjectFlow(id);
       return;
+    case 'toggle-archive':
+      await toggleArchive(id);
+      return;
+    case 'open-project':
+      location.hash = id ? `#/project/${encodeURIComponent(id)}` : '#/project/inbox';
+      return;
+    case 'toggle-project-sort':
+      toggleProjectSort();
+      return;
+    case 'move-project':
+      await moveProject(id, el.dataset.dir || '1');
+      return;
+    case 'project-filter':
+      setProjectFilter(el.dataset.project || 'all');
+      return;
     case 'go-tasks':
       location.hash = '#/tasks';
       return;
@@ -3047,9 +3322,15 @@ async function onAction(action, el) {
       if (state.editingNoteId === id) await saveNoteNow();
       openExportNoteModal(id);
       return;
-    case 'export-note-format':
-      exportNoteFormat(id, el.dataset.format || 'md');
+    case 'export-note-format': {
+      const note = state.notes.find((n) => n.id === id);
+      if (el.dataset.format === 'pdf') {
+        if (note) printNote(note);
+      } else {
+        exportNoteFormat(id, el.dataset.format || 'md');
+      }
       return;
+    }
     case 'edit-task': {
       const task = state.tasks.find((t) => t.id === id);
       if (task) openTaskModal(task);
@@ -3090,6 +3371,14 @@ async function onAction(action, el) {
         });
       }
       toast(`主题：${THEME_LABEL[mode]}`);
+      return;
+    }
+    case 'set-lang': {
+      setLang(el.dataset.lang);
+      applyLangMeta();
+      closeTopModal();
+      render({ scroll: false });
+      toast(tl('语言已切换'));
       return;
     }
     case 'rich':
@@ -3216,7 +3505,7 @@ function toast(message) {
   if (!root) return;
   const el = document.createElement('div');
   el.className = 'toast';
-  el.textContent = message;
+  el.textContent = translateText(String(message));
   root.appendChild(el);
   while (root.children.length > 3) root.firstElementChild.remove();
   setTimeout(() => {
