@@ -3,6 +3,13 @@
 一个**离线优先**的 PWA：把「记事本 / 待办事项 / 日历」合成一个 App。
 像素风 UI，资料全部存在本机（IndexedDB + 附件 blob），**不联网、不上传、不需要账号**。
 
+> v1.7：
+> - **笔记编辑器对齐 Apple 备忘录**：段落样式（标题／大标题／小标题／内文）、粗体斜体下划线删除线、四色荧光笔、清除荧光、清除格式、整篇还原、贴上纯文字、复原／重做。
+> - **整篇文字大小 A−／A＋**：每则笔记记住自己的字号（80%–180%），从别处贴进来的文字也会被正规化，不会再突然变小。
+> - **手机工具列重做**：常用按钮改成横向滑动；段落、字号、荧光、清除格式收进「Aa」面板，不再挤在一起或重叠。
+> - **移除「申请持久化储存」按钮**：Safari 的 `persist()` 可能被拒绝，不能当作保证；改为清楚说明「备份才可靠」，并保留储存用量显示。
+> - **新的主画面图标**：深色像素笔记本 + 绿色勾；iOS 用 `app-icon-180.png`，manifest 用 192/512/1024 与 maskable。
+>
 > v1.6：
 > - **修掉「更新后还看到旧版 / 一片空白」**：Service Worker 改成**网路优先**（`pixel-notes-v7`），并会自动删掉旧快取；启动失败时会显示**缺哪些档案**和「**清除快取并重新载入**」按钮，不再只有空白。
 > - **iOS 捷径限制**：网址捷径一定会在 Safari 开新页面，打不开主画面 App；改为建议用**剪贴板快速新增**（设置 → iOS 捷径）。
@@ -33,7 +40,13 @@
 ### 备忘录：资料夹 + 富文本 + 汇出
 
 - **备忘首页**是资料夹卡片：名称、笔记数、最后更新；固定「未分类」；可「全部笔记」跨资料夹搜索。
-- **笔记编辑器**像 iOS 备忘录：**B / I / U / H / • / 1. / ☐ 待办 / ▦ 表格 / ― 分隔线**，格式直接显示；表格可「＋行 / ＋栏 / 删表格」；待办方块可点选。
+- **笔记编辑器**像 iOS 备忘录：常用工具列（Aa / B / I / U / S / 荧光笔 / • / 1. / ☐ / ▦ / 🎤）可横向滑动；**Aa** 面板有：
+  - **段落**：标题 / 大标题 / 小标题 / 内文
+  - **文字大小**：整篇 A− / A＋（80%–180%，每则笔记记住）
+  - **荧光笔**：黄 / 粉红 / 绿 / 蓝，可清除
+  - **清除格式 / 整篇还原 / 贴上纯文字 / 复原 / 重做**
+  - 从别处贴上的文字会先正规化（去掉来源字级、颜色、多余标签），不会再突然变小。
+  - 表格可「＋行 / ＋栏 / 删表格」；待办方块可点选。
 - **汇出**：每则笔记都有「⇩ 汇出」（编辑器里、笔记列表每一列都有）：
   - **Markdown (.md)**：保留标题、清单、表格。
   - **纯文本 (.txt)**。
@@ -49,7 +62,7 @@
 - **提醒**：任务设「提前 5/10/30/60 分钟」，导出 `.ics` 后由 iOS 系统日历本机提醒（不需要服务器）。
 - **iOS 捷径**：剪贴板快速新增任务；另有 Safari 内 URL 预填（受 iOS 限制，不会打开主画面 App，详见下文）。
 - **备份**：JSON 汇出/汇入（含专案、资料夹、附件）。
-- **部署检查**：设置里逐一确认 14 个工作档案（含 `icons/`）是否存在。
+- **部署检查**：设置里逐一确认 17 个工作档案（含 `icons/`）是否存在。
 - **载入失败提示**：模块没载入时直接显示缺哪个档案，不再空白。
 
 ---
@@ -68,6 +81,7 @@
 - `08-folder.png` 资料夹内的笔记列表（每列都有汇出按钮）
 - `09-note-editor.png` 富文本编辑器
 - `10-note-table.png` 编辑器里的表格
+- `14-format-sheet.png` Aa 段落／字号／荧光笔面板
 - `11-note-export.png` 笔记汇出选单
 - `12-dark-home.png` 深色主题
 - `13-ipad.png` iPad 版面
@@ -98,13 +112,14 @@ PWA 要安装，必须先有一个 **HTTPS 网址**。免费静态托管都可�
 
 1. 在 GitHub 建一个 repository（例如 `pixel-notes`），设为 Public。
 2. 进 repo → **Add file → Upload files**，把这个文件夹里的**所有文件**传上去：
-   `index.html`、`styles.css`、`app.js`、`db.js`、`util.js`、`ics.js`、`md.js`、`richtext.js`、`sw.js`、`manifest.webmanifest`、`README.md`，以及整个 **`icons/`** 资料夹。
+   `index.html`、`styles.css`、`app.js`、`db.js`、`util.js`、`ics.js`、`md.js`、`richtext.js`、`i18n.js`、`sw.js`、`manifest.webmanifest`、`README.md`，以及整个 **`icons/`** 资料夹。
 3. **Settings → Pages**：Source 选 `Deploy from a branch`，Branch 选 `main` / 根目录，保存。
 4. 等一两分钟，网址会是 `https://<你的帐号>.github.io/pixel-notes/`。
 5. 用 Safari 打开 → 点「分享」→「加到主画面」→「加入」。
 
-> 品牌图示和 favicon 是内嵌的，漏掉 `icons/` 也不会破图；但**主画面图标**（manifest / apple-touch-icon）仍然要 `icons/` 里的 PNG。
+> 顶栏品牌图和 favicon 有内嵌版本；但**主画面图标**仍然要 `icons/` 里的 PNG（`app-icon-180.png` 给 iOS、`app-icon-192/512.png` 给 manifest、`app-icon-maskable-512.png` 给 Android）。
 > 上传完打开 App → 设置 →「部署检查」可以确认每个档案都在。
+> 如果主画面还是旧图标：**删除旧图 → 清除网站资料 → 重新「加到主画面」**；图标档名已换成 `app-icon-*`，iOS 会重新抓取。
 
 ### 方案 B：Netlify Drop（电脑上最快）
 
@@ -187,7 +202,7 @@ https://你的网址/#/new?title=买菜&date=2026-11-02&start=18:00&end=19:00&ca
 
 **升级**：v1.3 的 DB 版本是 2，会自动建立 `projects` / `folders`；旧任务/笔记会在「未分类」，不会丢失。
 
-**容量**：Safari 单来源配额通常约 1GB 起，可在设置 → 储存查看；加到主画面后不受 7 天清理规则影响。仍建议定期汇出备份。
+**容量与保留**：Safari 单来源配额通常约 1GB 起，可在设置 → 储存查看。加到主画面通常可避开 Safari 对「一段时间没开」网站的清理，但**系统仍可能在空间不足时清掉资料**；唯一可靠的做法是定期汇出备份。
 
 **备份**：设置 → 汇出备份 JSON（含专案、资料夹、附件）；汇入会**覆盖**现有资料。
 
@@ -199,7 +214,7 @@ https://你的网址/#/new?title=买菜&date=2026-11-02&start=18:00&end=19:00&ca
 - 关闭 App 后不会背景同步或提醒（提醒交给系统日历）。
 - 上架 App Store / Widget / Spotlight 需要原生 App。
 - 语音识别在 iOS 要靠键盘听写。
-- 富文本用 `contenteditable` + `execCommand`；复杂网页粘贴会简化成白名单标签。
+- 富文本用 `contenteditable` + `execCommand`；贴上内容会先经过 `sanitizePasteHtml()`，去掉来源网站的字级、颜色与多余标签，再存成白名单 HTML（含 `<mark>` 荧光）。
 
 **隐私**：没有第三方请求；「部署检查」只抓自己站上的档案；Service Worker 只快取同源文件。
 
@@ -220,10 +235,10 @@ md.js                 轻量 Markdown 渲染（旧笔记转换用）
 richtext.js           HTML 白名单清理、HTML→纯文字、HTML→Markdown（汇出用）
 sw.js                 离线快取（CACHE 版本）
 manifest.webmanifest  PWA manifest
-icons/                图标（tools/make_icons.py 生成）
+icons/                图标（app-icon-*；tools/make_icons.py 生成）
 tools/test-util.mjs   日期/格式化测试
 tools/test-core.mjs   提醒/逾期/.ics/Markdown 测试
-tools/smoke.mjs       端到端测试（83 项检查，截图到 tools/shots/）
+tools/smoke.mjs       端到端测试（94 项检查，截图到 tools/shots/）
 tools/test-migrate.mjs 旧简体示范资料 → English / 繁體 迁移测试
 tools/scan-i18n.mjs   英文模式残留中文扫描
 tools/check-zh.mjs    繁體模式残留简体扫描

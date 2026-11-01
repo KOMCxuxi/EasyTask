@@ -1,11 +1,11 @@
-﻿// app.js — Pixel Notes 前端主程序
+// app.js — Pixel Notes 前端主程序
 // 纯前端、离线优先：资料全部存在 IndexedDB，附件存 blob，不需要任何伺服器。
 
 import { db } from './db.js';
 import { getLang, initLang, isZh, LANGS, setLang, tl, translateDom, translateText } from './i18n.js';
 import { buildICS, icsFilename } from './ics.js';
 import { renderMarkdown } from './md.js';
-import { htmlToMarkdown, htmlToText, isEmptyHtml, sanitizeHtml } from './richtext.js';
+import { htmlToMarkdown, htmlToText, isEmptyHtml, sanitizeHtml, sanitizePasteHtml } from './richtext.js';
 import {
   DEFAULT_REMIND,
   addDays,
@@ -1297,28 +1297,60 @@ function renderNoteEditor(id) {
   const backAct = note.taskId ? 'back-task' : note.folderId ? 'back-folder' : 'back-notes';
   const backLabel = note.taskId ? '‹ 任务' : note.folderId ? '‹ 资料夹' : '‹ 备忘';
   const initialHtml = note.html ? sanitizeHtml(note.html) : renderMarkdown(note.body || '');
+  const scale = Math.min(1.8, Math.max(0.8, Number(note.scale) || 1));
+  const scalePct = Math.round(scale * 100);
 
   return `<section class="editor">
     <div class="editor-bar">
       <button class="btn tiny" type="button" data-act="${backAct}">${backLabel}</button>
       <span class="spacer"></span>
-      ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="move-note" data-id="${note.id}" title="移动到资料夹">📁 ${folder ? `<span data-raw>${esc(folder.name)}</span>` : '<span>未分类</span>'}</button>`}
       <button class="btn tiny" type="button" data-act="export-note" data-id="${note.id}">⇩ 汇出</button>
-      ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="toggle-pin" data-id="${note.id}">${note.pinned ? '取消置顶' : '置顶'}</button>`}
-      <button class="btn tiny btn-danger" type="button" data-act="delete-note" data-id="${note.id}">删除</button>
+      <button class="btn tiny" type="button" data-act="note-more" data-id="${note.id}" aria-label="笔记选项" title="笔记选项">⋯</button>
     </div>
     <div class="md-toolbar" role="toolbar" aria-label="笔记格式工具">
+      <button class="tool tool-aa" type="button" data-act="toggle-format-sheet" title="段落与格式" aria-label="段落与格式">Aa</button>
       <button class="tool" type="button" data-act="rich" data-cmd="bold" title="粗体" aria-label="粗体"><b>B</b></button>
       <button class="tool" type="button" data-act="rich" data-cmd="italic" title="斜体" aria-label="斜体"><em>I</em></button>
       <button class="tool" type="button" data-act="rich" data-cmd="underline" title="下划线" aria-label="下划线"><u>U</u></button>
-      <button class="tool" type="button" data-act="rich" data-cmd="h2" title="大标题" aria-label="大标题">H</button>
+      <button class="tool" type="button" data-act="rich" data-cmd="strike" title="删除线" aria-label="删除线"><s>S</s></button>
+      <button class="tool tool-hl" type="button" data-act="rich" data-cmd="highlight" data-color="yellow" title="荧光笔" aria-label="荧光笔">▮</button>
       <button class="tool" type="button" data-act="rich" data-cmd="ul" title="项目符号" aria-label="项目符号">•</button>
       <button class="tool" type="button" data-act="rich" data-cmd="ol" title="编号清单" aria-label="编号清单">1.</button>
       <button class="tool" type="button" data-act="rich" data-cmd="todo" title="待办清单" aria-label="待办清单">☐</button>
       <button class="tool" type="button" data-act="rich" data-cmd="table" title="插入表格" aria-label="插入表格">▦</button>
-      <button class="tool" type="button" data-act="rich" data-cmd="hr" title="分隔线" aria-label="分隔线">―</button>
       <span class="spacer"></span>
       <button class="tool" id="btn-dictate" type="button" data-act="dictate-note" title="语音输入（iOS 请用键盘上的 🎤 听写）" aria-label="语音输入">🎤</button>
+    </div>
+    <div class="format-sheet" id="format-sheet" hidden>
+      <div class="fs-row">
+        <span class="fs-label">段落</span>
+        <button class="fs-chip" type="button" data-act="block-style" data-block="h1">标题</button>
+        <button class="fs-chip" type="button" data-act="block-style" data-block="h2">大标题</button>
+        <button class="fs-chip" type="button" data-act="block-style" data-block="h3">小标题</button>
+        <button class="fs-chip" type="button" data-act="block-style" data-block="p">内文</button>
+      </div>
+      <div class="fs-row">
+        <span class="fs-label">文字大小</span>
+        <button class="fs-btn" type="button" data-act="font-dec" aria-label="缩小">A−</button>
+        <span class="fs-value" id="font-scale-label">${scalePct}%</span>
+        <button class="fs-btn" type="button" data-act="font-inc" aria-label="放大">A＋</button>
+        <span class="fs-note">整则笔记</span>
+      </div>
+      <div class="fs-row">
+        <span class="fs-label">荧光笔</span>
+        <button class="hl-swatch hl-yellow" type="button" data-act="highlight-color" data-color="yellow" aria-label="黄色"></button>
+        <button class="hl-swatch hl-pink" type="button" data-act="highlight-color" data-color="pink" aria-label="粉红"></button>
+        <button class="hl-swatch hl-green" type="button" data-act="highlight-color" data-color="green" aria-label="绿色"></button>
+        <button class="hl-swatch hl-blue" type="button" data-act="highlight-color" data-color="blue" aria-label="蓝色"></button>
+        <button class="fs-btn" type="button" data-act="clear-highlight">清除</button>
+      </div>
+      <div class="fs-row fs-actions">
+        <button class="fs-btn" type="button" data-act="clear-format">清除格式</button>
+        <button class="fs-btn" type="button" data-act="clear-all-format">整篇还原</button>
+        <button class="fs-btn" type="button" data-act="paste-plain">贴上纯文字</button>
+        <button class="fs-btn" type="button" data-act="undo">复原</button>
+        <button class="fs-btn" type="button" data-act="redo">重做</button>
+      </div>
     </div>
     <div class="md-toolbar table-tools" id="table-tools" hidden>
       <span class="tool-label">表格</span>
@@ -1327,7 +1359,7 @@ function renderNoteEditor(id) {
       <button class="tool" type="button" data-act="table-del">删表格</button>
     </div>
     <input id="note-title" class="note-title" type="text" placeholder="标题" value="${esc(note.title)}" autocomplete="off">
-    <div id="note-body" class="note-body rich-content" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="开始输入…">${initialHtml}</div>
+    <div id="note-body" class="note-body rich-content" style="--note-scale:${scale}" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="开始输入…">${initialHtml}</div>
     <div class="editor-foot">
       <span id="note-count">${tl('{n} 字', { n: charCount(note.body) })}</span>
       <span class="save-state" id="save-state">${tl('已储存')}</span>
@@ -1339,8 +1371,23 @@ function renderNoteEditor(id) {
   </section>`;
 }
 
+const HIGHLIGHT_HEX = {
+  yellow: '#ffe066',
+  pink: '#ffb3c7',
+  green: '#b7f0c0',
+  blue: '#b9dcff',
+};
+
+function selectionInEditor(editor) {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return null;
+  return { selection, range };
+}
+
 /** 执行格式指令（内容会直接呈现在编辑区，像备忘录那样） */
-function richCommand(command) {
+function richCommand(command, options = {}) {
   const editor = getNoteEditor();
   if (!editor) return;
   if (command === 'table') {
@@ -1357,13 +1404,16 @@ function richCommand(command) {
       false,
       '<ul class="rich-todo"><li><span class="todo-box" contenteditable="false">☐</span> 待办事项</li></ul><p><br></p>'
     );
+  } else if (command === 'highlight') {
+    highlightSelection(editor, options.color || 'yellow');
+  } else if (command === 'undo' || command === 'redo') {
+    document.execCommand(command);
   } else {
     const commands = {
       bold: ['bold'],
       italic: ['italic'],
       underline: ['underline'],
       strike: ['strikeThrough'],
-      h2: ['formatBlock', '<h2>'],
       quote: ['formatBlock', '<blockquote>'],
       ul: ['insertUnorderedList'],
       ol: ['insertOrderedList'],
@@ -1377,6 +1427,199 @@ function richCommand(command) {
   rememberSelection();
   notifyEditorChanged();
   updateTableTools();
+}
+
+function highlightSelection(editor, color) {
+  const data = selectionInEditor(editor);
+  if (!data || data.range.collapsed) {
+    toast('先选取要标示的文字');
+    return;
+  }
+  const hex = HIGHLIGHT_HEX[color] || HIGHLIGHT_HEX.yellow;
+  const ok = document.execCommand('hiliteColor', false, hex);
+  if (!ok) {
+    const mark = document.createElement('mark');
+    mark.className = `hl-${HIGHLIGHT_HEX[color] ? color : 'yellow'}`;
+    try {
+      data.range.surroundContents(mark);
+    } catch (err) {
+      const fragment = data.range.extractContents();
+      mark.appendChild(fragment);
+      data.range.insertNode(mark);
+    }
+  }
+}
+
+function clearAllHighlights(editor) {
+  editor.querySelectorAll('mark').forEach((mark) => mark.replaceWith(...Array.from(mark.childNodes)));
+  editor.querySelectorAll('[style]').forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    el.style.backgroundColor = '';
+    el.style.background = '';
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+  });
+}
+
+function clearHighlight(editor) {
+  const data = selectionInEditor(editor);
+  if (!data) return;
+  if (data.range.collapsed) {
+    clearAllHighlights(editor);
+    toast('已清除整篇荧光');
+    rememberSelection();
+    notifyEditorChanged();
+    return;
+  }
+  document.execCommand('hiliteColor', false, 'transparent');
+  const range = data.range;
+  editor.querySelectorAll('mark, [style*="background"]').forEach((el) => {
+    let hit = false;
+    try {
+      hit = range.intersectsNode(el);
+    } catch (err) {
+      hit = false;
+    }
+    if (!hit) return;
+    if (el.tagName === 'MARK') {
+      el.replaceWith(...Array.from(el.childNodes));
+    } else if (el instanceof HTMLElement) {
+      el.style.backgroundColor = '';
+      el.style.background = '';
+      if (!el.getAttribute('style')) el.replaceWith(...Array.from(el.childNodes));
+    }
+  });
+  rememberSelection();
+  notifyEditorChanged();
+}
+
+function setBlockStyle(block) {
+  const editor = getNoteEditor();
+  if (!editor) return;
+  const tag = ['h1', 'h2', 'h3', 'p'].includes(block) ? block : 'p';
+  editor.focus();
+  restoreSelection(editor);
+  document.execCommand('formatBlock', false, `<${tag}>`);
+  rememberSelection();
+  notifyEditorChanged();
+}
+
+function clearFormattingSelection() {
+  const editor = getNoteEditor();
+  if (!editor) return;
+  editor.focus();
+  restoreSelection(editor);
+  const selection = selectionInEditor(editor);
+  document.execCommand('removeFormat');
+  if (selection && !selection.range.collapsed) clearHighlight(editor);
+  rememberSelection();
+  notifyEditorChanged();
+}
+
+function stripFormatting(root) {
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    stripFormatting(child);
+    const tag = child.tagName;
+    if (['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'MARK', 'A', 'CODE', 'SPAN'].includes(tag)) {
+      if (tag === 'SPAN' && child.classList.contains('todo-box')) continue;
+      child.replaceWith(...Array.from(child.childNodes));
+      continue;
+    }
+    if (/^H[1-6]$/.test(tag)) {
+      const paragraph = document.createElement('p');
+      paragraph.append(...Array.from(child.childNodes));
+      child.replaceWith(paragraph);
+      continue;
+    }
+    if (tag === 'PRE') {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = child.textContent;
+      child.replaceWith(paragraph);
+      continue;
+    }
+    const keepClass =
+      (tag === 'UL' && child.classList.contains('rich-todo')) || (tag === 'LI' && child.classList.contains('done'));
+    child.removeAttribute('style');
+    if (keepClass) child.className = tag === 'UL' ? 'rich-todo' : 'done';
+    else child.removeAttribute('class');
+  }
+}
+
+async function clearAllFormatting() {
+  const editor = getNoteEditor();
+  if (!editor) return;
+  const ok = await confirmDialog({
+    title: '整篇还原成内文',
+    message: '会把标题、粗体、斜体、荧光等还原成内文；清单与表格结构会保留。这个动作无法复原。',
+    confirmText: '清除格式',
+    danger: true,
+  });
+  if (!ok) return;
+  stripFormatting(editor);
+  notifyEditorChanged();
+}
+
+async function pastePlainText() {
+  const editor = getNoteEditor();
+  if (!editor) return;
+  let text = '';
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (err) {
+    toast('无法读取剪贴板；请允许剪贴板权限，或长按贴上。');
+    return;
+  }
+  if (!text) {
+    toast('剪贴板是空的');
+    return;
+  }
+  editor.focus();
+  restoreSelection(editor);
+  document.execCommand('insertText', false, text);
+  rememberSelection();
+  notifyEditorChanged();
+}
+
+async function changeNoteScale(delta) {
+  const note = state.notes.find((n) => n.id === state.editingNoteId);
+  if (!note) return;
+  const next = Math.min(1.8, Math.max(0.8, Math.round(((Number(note.scale) || 1) + delta) * 10) / 10));
+  if (next === (Number(note.scale) || 1)) return;
+  note.scale = next;
+  note.updatedAt = Date.now();
+  const editor = getNoteEditor();
+  if (editor) editor.style.setProperty('--note-scale', String(next));
+  const label = document.getElementById('font-scale-label');
+  if (label) label.textContent = `${Math.round(next * 100)}%`;
+  try {
+    await db.notePut(note);
+    setSaveState('已储存');
+  } catch (err) {
+    toast('储存失败：' + err.message);
+  }
+}
+
+function toggleFormatSheet(force) {
+  const sheet = document.getElementById('format-sheet');
+  if (!sheet) return;
+  sheet.hidden = typeof force === 'boolean' ? !force : !sheet.hidden;
+}
+
+function handleNotePaste(event) {
+  const target = event.target;
+  if (!(target instanceof Element) || target.id !== 'note-body') return;
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+  const html = clipboard.getData('text/html');
+  const text = clipboard.getData('text/plain');
+  event.preventDefault();
+  if (html) {
+    document.execCommand('insertHTML', false, sanitizePasteHtml(html));
+  } else {
+    document.execCommand('insertText', false, text);
+  }
+  rememberSelection();
+  notifyEditorChanged();
 }
 
 function currentTableCell() {
@@ -2240,6 +2483,10 @@ function exportNoteHtml(title, html) {
   pre { padding: 10px; overflow: auto; background: #f2eee2; }
   .todo-box { margin-right: 4px; }
   li.done { color: #777; text-decoration: line-through; }
+  mark { padding: 0 2px; background: #ffe066; color: inherit; }
+  mark.hl-pink { background: #ffb3c7; }
+  mark.hl-green { background: #b7f0c0; }
+  mark.hl-blue { background: #b9dcff; }
 </style>
 </head>
 <body>
@@ -2280,6 +2527,25 @@ function safeFileName(value) {
     .trim()
     .slice(0, 60);
   return cleaned || 'note';
+}
+
+function openNoteMoreModal(note) {
+  openModal(`
+    <div class="modal-head">
+      <h2>笔记选项</h2>
+      <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
+    </div>
+    <div class="export-list">
+      ${note.taskId ? '' : `<button class="export-row" type="button" data-act="note-more-move" data-id="${note.id}">
+        <strong>📁 移动到资料夹</strong><span>把笔记放进别的资料夹</span>
+      </button>`}
+      <button class="export-row" type="button" data-act="note-more-pin" data-id="${note.id}">
+        <strong>${note.pinned ? '取消置顶' : '置顶'}</strong><span>${note.pinned ? '从备忘列表顶端移开' : '固定在备忘列表顶端'}</span>
+      </button>
+      <button class="export-row row-danger" type="button" data-act="note-more-delete" data-id="${note.id}">
+        <strong>删除笔记</strong><span>删除后无法还原</span>
+      </button>
+    </div>`);
 }
 
 function openExportNoteModal(noteId) {
@@ -2808,8 +3074,7 @@ function openSettings() {
     <section class="set-block">
       <h3>储存</h3>
       <p class="hint" id="storage-info">读取中…</p>
-      <button class="btn" type="button" data-act="persist-storage">申请持久化储存</button>
-      <p class="hint" id="persist-info" style="margin-top:8px"></p>
+      <p class="hint" style="margin-top:8px">浏览器可能为了空间清理网站资料；加到主画面会降低风险，但唯一可靠的做法是定期汇出备份（见下方「备份与还原」）。</p>
     </section>
 
     <section class="set-block">
@@ -2849,7 +3114,7 @@ function openSettings() {
 
     <section class="set-block">
       <h3>应用</h3>
-      <p class="hint">Pixel Notes v1.6 · 离线优先，不需要网络。</p>
+      <p class="hint">Pixel Notes v1.7 · 离线优先，不需要网络。</p>
       <button class="btn" type="button" data-act="force-update">检查更新（清除快取）</button>
     </section>
 
@@ -2957,10 +3222,12 @@ const DEPLOY_FILES = [
   './i18n.js',
   './sw.js',
   './manifest.webmanifest',
-  './icons/icon-180.png',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/mark.svg',
+  './icons/app-icon-32.png',
+  './icons/app-icon-180.png',
+  './icons/app-icon-192.png',
+  './icons/app-icon-512.png',
+  './icons/app-icon-1024.png',
+  './icons/app-icon-maskable-512.png',
 ];
 
 async function checkAssets() {
@@ -3029,31 +3296,10 @@ async function fillStorageInfo() {
     const estimate = await navigator.storage.estimate();
     const usage = estimate.usage || 0;
     const quota = estimate.quota || 0;
-    const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : false;
     const quotaText = quota ? tl(' / 可用约 {q}', { q: humanSize(quota) }) : '';
-    el.textContent = tl('已用 {used}{quota}{persist}', {
-      used: humanSize(usage),
-      quota: quotaText,
-      persist: persisted ? tl(' · 已持久化') : tl(' · 未持久化'),
-    });
+    el.textContent = tl('已用 {used}{quota}', { used: humanSize(usage), quota: quotaText });
   } catch (err) {
     el.textContent = tl('无法读取储存资讯。');
-  }
-}
-
-async function requestPersist() {
-  const info = document.getElementById('persist-info');
-  if (!navigator.storage || !navigator.storage.persist) {
-    if (info) info.textContent = tl('这个浏览器不支援持久化储存。');
-    return;
-  }
-  try {
-    const ok = await navigator.storage.persist();
-    if (info) info.textContent = ok ? tl('✓ 已获得持久化储存') : tl('未授予。iOS 上通常要先「加到主画面」再申请。');
-    toast(ok ? tl('已获得持久化储存') : tl('未授予持久化储存'));
-    await fillStorageInfo();
-  } catch (err) {
-    if (info) info.textContent = tl('申请失败：{msg}', { msg: err.message });
   }
 }
 
@@ -3296,6 +3542,8 @@ function bindEvents() {
   document.addEventListener('pointerup', endProjectDrag);
   document.addEventListener('pointercancel', endProjectDrag);
 
+  document.addEventListener('paste', handleNotePaste, true);
+
   document.addEventListener('selectionchange', () => {
     rememberSelection();
     updateTableTools();
@@ -3514,7 +3762,63 @@ async function onAction(action, el) {
       return;
     }
     case 'rich':
-      richCommand(el.dataset.cmd || 'bold');
+      richCommand(el.dataset.cmd || 'bold', { color: el.dataset.color || 'yellow' });
+      return;
+    case 'toggle-format-sheet':
+      toggleFormatSheet();
+      return;
+    case 'block-style':
+      setBlockStyle(el.dataset.block || 'p');
+      return;
+    case 'font-dec':
+      await changeNoteScale(-0.1);
+      return;
+    case 'font-inc':
+      await changeNoteScale(0.1);
+      return;
+    case 'highlight-color':
+      richCommand('highlight', { color: el.dataset.color || 'yellow' });
+      return;
+    case 'clear-highlight': {
+      const editor = getNoteEditor();
+      if (editor) {
+        editor.focus();
+        restoreSelection(editor);
+        clearHighlight(editor);
+      }
+      return;
+    }
+    case 'clear-format':
+      clearFormattingSelection();
+      return;
+    case 'clear-all-format':
+      await clearAllFormatting();
+      return;
+    case 'paste-plain':
+      await pastePlainText();
+      return;
+    case 'undo':
+      richCommand('undo');
+      return;
+    case 'redo':
+      richCommand('redo');
+      return;
+    case 'note-more': {
+      const note = state.notes.find((n) => n.id === id);
+      if (note) openNoteMoreModal(note);
+      return;
+    }
+    case 'note-more-move':
+      closeTopModal();
+      openMoveNoteModal(id);
+      return;
+    case 'note-more-pin':
+      closeTopModal();
+      await togglePin(id);
+      return;
+    case 'note-more-delete':
+      closeTopModal();
+      await deleteNoteFlow(id);
       return;
     case 'insert-table':
       insertTableFromModal(el);
@@ -3613,9 +3917,6 @@ async function onAction(action, el) {
     }
     case 'clear-all':
       await clearAllFlow();
-      return;
-    case 'persist-storage':
-      await requestPersist();
       return;
     case 'force-update':
       await forceUpdate();

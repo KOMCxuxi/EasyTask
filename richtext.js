@@ -5,10 +5,29 @@
 const ALLOWED = new Set([
   'P', 'DIV', 'BR', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL',
   'H1', 'H2', 'H3', 'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD',
-  'BLOCKQUOTE', 'HR', 'SPAN', 'A', 'CODE', 'PRE',
+  'BLOCKQUOTE', 'HR', 'SPAN', 'A', 'CODE', 'PRE', 'MARK',
 ]);
 
 const VOID = new Set(['BR', 'HR']);
+
+const HIGHLIGHT_CLASSES = new Set(['hl-yellow', 'hl-pink', 'hl-green', 'hl-blue']);
+const HIGHLIGHT_COLORS = [
+  ['255, 224, 102', 'hl-yellow'],
+  ['255, 179, 199', 'hl-pink'],
+  ['183, 240, 192', 'hl-green'],
+  ['185, 220, 255', 'hl-blue'],
+];
+
+function highlightFromStyle(style) {
+  const value = String(style || '').toLowerCase();
+  const match = /background(?:-color)?\s*:\s*([^;]+)/i.exec(value);
+  if (!match) return '';
+  const color = match[1].replace(/\s+/g, ' ');
+  for (const [rgb, cls] of HIGHLIGHT_COLORS) {
+    if (color.includes(rgb)) return cls;
+  }
+  return '';
+}
 
 function cleanChildren(node, doc) {
   const out = [];
@@ -25,6 +44,27 @@ function cleanChildren(node, doc) {
       continue;
     }
 
+    if (tag === 'SPAN') {
+      if (child.classList.contains('todo-box')) {
+        const span = doc.createElement('span');
+        span.className = 'todo-box';
+        span.textContent = child.textContent;
+        out.push(span);
+        continue;
+      }
+      const hl = highlightFromStyle(child.getAttribute('style'));
+      if (hl) {
+        const mark = doc.createElement('mark');
+        mark.className = hl;
+        for (const cleaned of cleanChildren(child, doc)) mark.appendChild(cleaned);
+        out.push(mark);
+      } else {
+        // 贴上的 span 一律拆掉，避免把来源网站的字级/颜色带进来
+        out.push(...cleanChildren(child, doc));
+      }
+      continue;
+    }
+
     const el = doc.createElement(tag);
     if (tag === 'A') {
       const href = child.getAttribute('href') || '';
@@ -34,12 +74,25 @@ function cleanChildren(node, doc) {
         el.setAttribute('rel', 'noopener noreferrer');
       }
     }
-    if (tag === 'SPAN' && child.classList.contains('todo-box')) el.className = 'todo-box';
+    if (tag === 'MARK') {
+      const cls = Array.from(child.classList).find((name) => HIGHLIGHT_CLASSES.has(name));
+      el.className = cls || 'hl-yellow';
+    }
     if (tag === 'UL' && child.classList.contains('rich-todo')) el.className = 'rich-todo';
     if (tag === 'LI' && child.classList.contains('done')) el.className = 'done';
+    if (tag === 'LI' && child.classList.contains('md-check')) el.className = 'md-check done';
 
     if (!VOID.has(tag)) {
-      for (const cleaned of cleanChildren(child, doc)) el.appendChild(cleaned);
+      const cleaned = cleanChildren(child, doc);
+      const hl = tag === 'MARK' ? '' : highlightFromStyle(child.getAttribute('style'));
+      if (hl) {
+        const mark = doc.createElement('mark');
+        mark.className = hl;
+        for (const node of cleaned) mark.appendChild(node);
+        el.appendChild(mark);
+      } else {
+        for (const node of cleaned) el.appendChild(node);
+      }
     }
     out.push(el);
   }
@@ -53,6 +106,21 @@ export function sanitizeHtml(html) {
   const holder = document.createElement('div');
   for (const node of cleanChildren(template.content, document)) holder.appendChild(node);
   return holder.innerHTML;
+}
+
+/** 贴上时先正规化：标题层级收敛、移除 font/span 的字级与颜色，再走白名单清理 */
+export function sanitizePasteHtml(html) {
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+  template.content.querySelectorAll('h4, h5, h6').forEach((heading) => {
+    const h3 = document.createElement('h3');
+    while (heading.firstChild) h3.appendChild(heading.firstChild);
+    heading.replaceWith(h3);
+  });
+  template.content.querySelectorAll('font').forEach((font) => {
+    font.replaceWith(...Array.from(font.childNodes));
+  });
+  return sanitizeHtml(template.innerHTML);
 }
 
 /** 把富文本转成纯文字（存 body 供列表预览 / 搜索） */

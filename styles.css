@@ -977,7 +977,17 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.editor-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.editor-bar .btn {
+  flex: 0 0 auto;
 }
 
 .save-state {
@@ -1550,6 +1560,24 @@ body.printing #modal-root {
   .print-note img {
     max-width: 100%;
   }
+
+  .print-note mark {
+    padding: 0 2px;
+    color: inherit;
+    background: #ffe066;
+  }
+
+  .print-note mark.hl-pink {
+    background: #ffb3c7;
+  }
+
+  .print-note mark.hl-green {
+    background: #b7f0c0;
+  }
+
+  .print-note mark.hl-blue {
+    background: #b9dcff;
+  }
 }
 
 /* ---------- 载入 / 其他 ---------- */
@@ -1609,12 +1637,26 @@ body.printing #modal-root {
 
 .md-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   padding: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
   background: var(--card-2);
   border: 2px solid var(--line);
+}
+
+.md-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.md-toolbar .tool {
+  flex: 0 0 auto;
+}
+
+.md-toolbar .spacer {
+  flex: 0 0 4px;
 }
 
 .tool {
@@ -1639,6 +1681,110 @@ body.printing #modal-root {
 
 .tool.rec {
   background: var(--hl-danger-card);
+}
+
+.tool-hl {
+  background: #ffe066;
+}
+
+/* ---------- 笔记：段落 / 字级 / 荧光笔面板 ---------- */
+
+.format-sheet {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  background: var(--card);
+  border: 2px solid var(--line);
+}
+
+.format-sheet[hidden] {
+  display: none;
+}
+
+.fs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--grid-line);
+}
+
+.fs-row:last-child {
+  border-bottom: 0;
+}
+
+.fs-label {
+  min-width: 54px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.fs-chip,
+.fs-btn {
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--card-2);
+  border: 2px solid var(--line);
+  box-shadow: 2px 2px 0 var(--shadow-color);
+  cursor: pointer;
+}
+
+.fs-chip:active,
+.fs-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.fs-value {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.fs-note {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.fs-actions .fs-btn {
+  flex: 1 1 auto;
+}
+
+.hl-swatch {
+  width: 28px;
+  height: 26px;
+  border: 2px solid var(--line);
+  box-shadow: 2px 2px 0 var(--shadow-color);
+  cursor: pointer;
+}
+
+.hl-swatch:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+.hl-swatch.hl-yellow {
+  background: #ffe066;
+}
+
+.hl-swatch.hl-pink {
+  background: #ffb3c7;
+}
+
+.hl-swatch.hl-green {
+  background: #b7f0c0;
+}
+
+.hl-swatch.hl-blue {
+  background: #b9dcff;
+}
+
+.row-danger strong {
+  color: #b3261e;
 }
 
 .md-hint {
@@ -1680,16 +1826,38 @@ body.printing #modal-root {
 
 .rich-content h1 {
   padding-bottom: 4px;
-  font-size: 24px;
+  font-size: 1.5em;
   border-bottom: 2px solid var(--line);
 }
 
 .rich-content h2 {
-  font-size: 20px;
+  font-size: 1.28em;
 }
 
 .rich-content h3 {
-  font-size: 17px;
+  font-size: 1.12em;
+}
+
+.rich-content mark {
+  padding: 0 2px;
+  color: inherit;
+  background: #ffe066;
+}
+
+.rich-content mark.hl-yellow {
+  background: #ffe066;
+}
+
+.rich-content mark.hl-pink {
+  background: var(--hl-pink, #ffb3c7);
+}
+
+.rich-content mark.hl-green {
+  background: var(--hl-green, #b7f0c0);
+}
+
+.rich-content mark.hl-blue {
+  background: var(--hl-blue, #b9dcff);
 }
 
 .rich-content p {
@@ -1788,7 +1956,7 @@ body.printing #modal-root {
 /* 编辑器（contenteditable）专用 */
 .note-body.rich-content {
   min-height: 52dvh;
-  font-size: 16px;
+  font-size: calc(16px * var(--note-scale, 1));
   line-height: 1.75;
   cursor: text;
 }

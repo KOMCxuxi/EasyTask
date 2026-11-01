@@ -2,7 +2,7 @@
 // 更新版本时把 CACHE 改成新名字；旧快取会在 activate 时删掉。
 // 也可以在 App 的「设置 → 检查更新」手动清快取。
 
-const CACHE = 'pixel-notes-v7';
+const CACHE = 'pixel-notes-v9';
 
 const ASSETS = [
   './',
@@ -17,11 +17,12 @@ const ASSETS = [
   './i18n.js',
   './manifest.webmanifest',
   './icons/mark.svg',
-  './icons/favicon-32.png',
-  './icons/icon-180.png',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/icon-maskable-512.png',
+  './icons/app-icon-32.png',
+  './icons/app-icon-180.png',
+  './icons/app-icon-192.png',
+  './icons/app-icon-512.png',
+  './icons/app-icon-1024.png',
+  './icons/app-icon-maskable-512.png',
 ];
 
 self.addEventListener('install', (event) => {

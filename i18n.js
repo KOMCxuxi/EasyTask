@@ -167,7 +167,7 @@ const EN = {
     'Use the clipboard instead: in Shortcuts, run “Copy to Clipboard” with the task title on the first line and an optional date/time on the second (for example ',
   '建议改用剪贴板：在快捷指令用「拷贝到剪贴板」，第一行放任务标题，第二行可选放日期时间（例如':
     'Use the clipboard instead: in Shortcuts, run “Copy to Clipboard” with the task title on the first line and an optional date/time on the second (for example ',
-  'Pixel Notes v1.6 · 离线优先，不需要网络。': 'Pixel Notes v1.6 · offline-first, no network needed.',
+  'Pixel Notes v1.7 · 离线优先，不需要网络。': 'Pixel Notes v1.7 · offline-first, no network needed.',
   '），然后回到 App 按下面按钮。': '), then come back to the app and tap the button below.',
   '📋 从剪贴板新增任务': '📋 Add task from clipboard',
   '进阶：在 Safari 内用网址预填（只会在 Safari 生效）': 'Advanced: URL prefill inside Safari (Safari only)',
@@ -176,6 +176,25 @@ const EN = {
   '已复制': 'Copied', '清除并重载': 'Clear & reload', '检查更新': 'Check for updates',
   '会清除本机快取并重新载入。资料不受影响，但需要连线才能抓到新版本。': 'This clears the local cache and reloads. Your data is safe, but you need to be online to get the new version.',
   '更新失败：': 'Update failed: ',
+  '小标题': 'Subheading', '内文': 'Body', '段落': 'Paragraph', '文字大小': 'Text size',
+  '整则笔记': 'Whole note', '荧光笔': 'Highlight', '黄色': 'Yellow', '粉红': 'Pink',
+  '绿色': 'Green', '蓝色': 'Blue', '清除': 'Clear', '清除格式': 'Clear formatting',
+  '整篇还原': 'Reset all formatting', '贴上纯文字': 'Paste as plain text',
+  '复原': 'Undo', '重做': 'Redo', '笔记选项': 'Note options', '段落与格式': 'Paragraph & formatting',
+  '把笔记放进别的资料夹': 'Move this note to another folder',
+  '从备忘列表顶端移开': 'Remove from the top of Notes',
+  '固定在备忘列表顶端': 'Keep at the top of Notes',
+  '删除后无法还原': 'This cannot be undone',
+  '先选取要标示的文字': 'Select text to highlight',
+  '已清除整篇荧光': 'Removed all highlights',
+  '整篇还原成内文': 'Reset all formatting',
+  '会把标题、粗体、斜体、荧光等还原成内文；清单与表格结构会保留。这个动作无法复原。':
+    'This removes headings, bold, italic and highlights, keeping lists and tables. This cannot be undone.',
+  '无法读取剪贴板；请允许剪贴板权限，或长按贴上。': 'Could not read the clipboard. Allow clipboard access, or paste manually.',
+  '浏览器可能为了空间清理网站资料；加到主画面会降低风险，但唯一可靠的做法是定期汇出备份（见下方「备份与还原」）。':
+    'Browsers may clear website data to free space. Adding to the Home Screen lowers the risk, but the only reliable protection is exporting a backup regularly (see Backup & restore below).',
+  '删除线': 'Strikethrough', '缩小': 'Decrease size', '放大': 'Increase size',
+  '已用 {used}{quota}': 'Used {used}{quota}',
 };
 
 export function translateText(text) {
