@@ -4,6 +4,7 @@
 import { db } from './db.js';
 import { buildICS, icsFilename } from './ics.js';
 import { renderMarkdown } from './md.js';
+import { htmlToText, isEmptyHtml, sanitizeHtml } from './richtext.js';
 import {
   DEFAULT_REMIND,
   addDays,
@@ -31,7 +32,17 @@ import {
   uid,
 } from './util.js';
 
-const MARK = './icons/mark.svg';
+const MARK_SVG = `<svg class="mark" viewBox="0 0 16 16" width="44" height="44" aria-hidden="true" focusable="false" shape-rendering="crispEdges">
+  <rect width="16" height="16" fill="#f2eee2"/>
+  <rect x="2" y="1" width="12" height="14" fill="#191820"/>
+  <rect x="3" y="2" width="10" height="12" fill="#fffdf6"/>
+  <rect x="6" y="4" width="6" height="1" fill="#191820"/>
+  <rect x="6" y="6" width="6" height="1" fill="#191820"/>
+  <rect x="7" y="11" width="1" height="1" fill="#3ddc97"/>
+  <rect x="8" y="12" width="1" height="1" fill="#3ddc97"/>
+  <rect x="9" y="11" width="1" height="1" fill="#3ddc97"/>
+  <rect x="10" y="10" width="1" height="1" fill="#3ddc97"/>
+</svg>`;
 
 const CAT = {
   work: { label: '工作', color: '#4d9de0' },
@@ -75,8 +86,6 @@ const state = {
   filter: 'all',
   query: { tasks: '', notes: '' },
   editingNoteId: null,
-  noteMode: 'edit',
-  noteModeId: null,
   theme: 'auto',
   urls: [],
   hintDismissed: false,
@@ -175,7 +184,7 @@ async function boot() {
     const view = document.getElementById('view');
     if (view) {
       view.innerHTML = `<section class="page"><div class="empty">
-        <img class="mark" src="${MARK}" alt="">
+        ${MARK_SVG}
         <h2>无法启动</h2>
         <p>浏览器无法使用 IndexedDB。请用 Safari 打开，并确认没有开启无痕模式。</p>
         <p class="hint">${esc(err && err.message ? err.message : String(err))}</p>
@@ -307,8 +316,7 @@ async function render(opts = {}) {
     if (!(route.name === 'note' && route.id === state.editingNoteId)) state.editingNoteId = null;
   }
   if (route.name !== 'note') {
-    state.noteMode = 'edit';
-    state.noteModeId = null;
+    state.editingNoteId = null;
   }
   if (dictation && route.name !== 'note') {
     try {
@@ -374,8 +382,8 @@ function postRender(route) {
     updateEditorFoot(note);
     setSaveState('✓ 已储存');
     if (!note.title && !note.body) {
-      const title = document.getElementById('note-title');
-      if (title) setTimeout(() => title.focus({ preventScroll: true }), 90);
+      const editor = document.getElementById('note-body');
+      if (editor) setTimeout(() => editor.focus({ preventScroll: true }), 90);
     }
   }
 }
@@ -384,7 +392,7 @@ function postRender(route) {
 
 function emptyState(title, text) {
   return `<div class="empty">
-    <img class="mark" src="${MARK}" alt="">
+    ${MARK_SVG}
     <h2>${esc(title)}</h2>
     <p>${esc(text)}</p>
   </div>`;
@@ -392,7 +400,7 @@ function emptyState(title, text) {
 
 function notFoundPage(message, href) {
   return `<section class="page"><div class="empty">
-    <img class="mark" src="${MARK}" alt="">
+    ${MARK_SVG}
     <h2>${esc(message)}</h2>
     <a class="btn" href="${esc(href)}">返回</a>
   </div></section>`;
@@ -734,133 +742,273 @@ function updateNoteList() {
   if (sub) sub.textContent = `${state.notes.filter((n) => !n.taskId).length} 则 · 独立笔记`;
 }
 
-/* ---------- 笔记编辑器 ---------- */
+/* ---------- 笔记编辑器（富文本，像 iOS 备忘录） ---------- */
+
+let lastRange = null;
+
+function getNoteEditor() {
+  return document.getElementById('note-body');
+}
+
+function rememberSelection() {
+  const editor = getNoteEditor();
+  const sel = window.getSelection();
+  if (editor && sel && sel.rangeCount && editor.contains(sel.anchorNode)) {
+    lastRange = sel.getRangeAt(0).cloneRange();
+  }
+}
+
+function restoreSelection(editor) {
+  if (!editor) return;
+  if (lastRange && editor.contains(lastRange.startContainer)) {
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(lastRange);
+    return;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(editor);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function notifyEditorChanged() {
+  const editor = getNoteEditor();
+  if (editor) editor.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function placeCaretIn(element) {
+  if (!element) return;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  try {
+    element.scrollIntoView({ block: 'nearest' });
+  } catch (err) {
+    /* ignore */
+  }
+}
 
 function renderNoteEditor(id) {
   const note = state.notes.find((n) => n.id === id);
   if (!note) return notFoundPage('这则笔记不存在', '#/notes');
 
   state.editingNoteId = note.id;
+  lastRange = null;
   const backAct = note.taskId ? 'back-task' : 'back-notes';
   const backLabel = note.taskId ? '‹ 任务' : '‹ 备忘';
-  const preview = state.noteMode === 'preview' && state.noteModeId === note.id;
-  const previewHtml = renderMarkdown(note.body) || '<p class="empty-inline">这则笔记还是空的，按「✎ 编辑」开始写。</p>';
+  const initialHtml = note.html ? sanitizeHtml(note.html) : renderMarkdown(note.body || '');
 
   return `<section class="editor">
     <div class="editor-bar">
       <button class="btn tiny" type="button" data-act="${backAct}">${backLabel}</button>
       <span class="save-state" id="save-state">已储存</span>
       <span class="spacer"></span>
-      <button class="btn tiny" type="button" data-act="toggle-preview">${preview ? '✎ 编辑' : '👁 预览'}</button>
       ${note.taskId ? '' : `<button class="btn tiny" type="button" data-act="toggle-pin" data-id="${note.id}">${note.pinned ? '取消置顶' : '置顶'}</button>`}
       <button class="btn tiny btn-danger" type="button" data-act="delete-note" data-id="${note.id}">删除</button>
     </div>
-    ${preview
-      ? ''
-      : `<div class="md-toolbar" role="toolbar" aria-label="笔记格式工具">
-      <button class="tool" type="button" data-act="md-insert" data-md="bold" title="粗体" aria-label="粗体">B</button>
-      <button class="tool" type="button" data-act="md-insert" data-md="italic" title="斜体" aria-label="斜体"><em>I</em></button>
-      <button class="tool" type="button" data-act="md-insert" data-md="heading" title="标题" aria-label="标题">H</button>
-      <button class="tool" type="button" data-act="md-insert" data-md="list" title="清单" aria-label="清单">•</button>
-      <button class="tool" type="button" data-act="md-insert" data-md="task" title="待办" aria-label="待办清单">☐</button>
-      <button class="tool" type="button" data-act="md-insert" data-md="table" title="插入表格" aria-label="插入表格">▦</button>
-      <button class="tool" type="button" data-act="md-insert" data-md="quote" title="引用" aria-label="引用">❝</button>
-      <button class="tool" type="button" data-act="md-insert" data-md="code" title="程式码" aria-label="程式码">‹›</button>
+    <div class="md-toolbar" role="toolbar" aria-label="笔记格式工具">
+      <button class="tool" type="button" data-act="rich" data-cmd="bold" title="粗体" aria-label="粗体"><b>B</b></button>
+      <button class="tool" type="button" data-act="rich" data-cmd="italic" title="斜体" aria-label="斜体"><em>I</em></button>
+      <button class="tool" type="button" data-act="rich" data-cmd="underline" title="下划线" aria-label="下划线"><u>U</u></button>
+      <button class="tool" type="button" data-act="rich" data-cmd="h2" title="大标题" aria-label="大标题">H</button>
+      <button class="tool" type="button" data-act="rich" data-cmd="ul" title="项目符号" aria-label="项目符号">•</button>
+      <button class="tool" type="button" data-act="rich" data-cmd="ol" title="编号清单" aria-label="编号清单">1.</button>
+      <button class="tool" type="button" data-act="rich" data-cmd="todo" title="待办清单" aria-label="待办清单">☐</button>
+      <button class="tool" type="button" data-act="rich" data-cmd="table" title="插入表格" aria-label="插入表格">▦</button>
+      <button class="tool" type="button" data-act="rich" data-cmd="hr" title="分隔线" aria-label="分隔线">―</button>
       <span class="spacer"></span>
       <button class="tool" id="btn-dictate" type="button" data-act="dictate-note" title="语音输入（iOS 请用键盘上的 🎤 听写）" aria-label="语音输入">🎤</button>
-    </div>`}
+    </div>
+    <div class="md-toolbar table-tools" id="table-tools" hidden>
+      <span class="tool-label">表格</span>
+      <button class="tool" type="button" data-act="table-add-row">＋行</button>
+      <button class="tool" type="button" data-act="table-add-col">＋栏</button>
+      <button class="tool" type="button" data-act="table-del">删表格</button>
+    </div>
     <input id="note-title" class="note-title" type="text" placeholder="标题" value="${esc(note.title)}" autocomplete="off">
-    ${preview
-      ? `<div class="md-preview" id="note-preview">${previewHtml}</div>`
-      : `<textarea id="note-body" class="note-body" placeholder="开始输入… 支援 Markdown：**粗体**、- 清单、| 表格 |" spellcheck="false">${esc(note.body)}</textarea>`}
+    <div id="note-body" class="note-body rich-content" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" data-placeholder="开始输入…">${initialHtml}</div>
     <div class="editor-foot">
       <span id="note-count">${charCount(note.body)} 字</span>
       <div class="foot-right">
-        <span class="md-hint">${isIOS() ? '语音：用键盘 🎤 听写' : '支援 Markdown 与表格'}</span>
+        <span class="md-hint">${isIOS() ? '语音：用键盘 🎤 听写' : '支援表格、清单与粗体'}</span>
         <span id="note-updated">更新于 ${esc(fmtUpdated(note.updatedAt))}</span>
       </div>
     </div>
   </section>`;
 }
 
-/** 在文字游标处插入 Markdown 样板 */
-function mdInsert(kind) {
-  const textarea = document.getElementById('note-body');
-  if (!textarea) return;
-  const start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : textarea.value.length;
-  const end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
-  const selected = textarea.value.slice(start, end);
-
-  let insert = '';
-  switch (kind) {
-    case 'bold':
-      insert = `**${selected || '粗体'}**`;
-      break;
-    case 'italic':
-      insert = `*${selected || '斜体'}*`;
-      break;
-    case 'heading':
-      insert = `## ${selected || '标题'}`;
-      break;
-    case 'quote':
-      insert = (selected || '引用')
-        .split('\n')
-        .map((line) => `> ${line}`)
-        .join('\n');
-      break;
-    case 'list':
-      insert = (selected || '项目一\n项目二')
-        .split('\n')
-        .map((line) => `- ${line}`)
-        .join('\n');
-      break;
-    case 'task':
-      insert = (selected || '待办一\n待办二')
-        .split('\n')
-        .map((line) => `- [ ] ${line}`)
-        .join('\n');
-      break;
-    case 'code':
-      insert = selected ? `\`${selected}\`` : '```\n\n```';
-      break;
-    case 'table':
-      insert = '| 项目 | 内容 | 备注 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |';
-      break;
-    default:
-      return;
+/** 执行格式指令（内容会直接呈现在编辑区，像备忘录那样） */
+function richCommand(command) {
+  const editor = getNoteEditor();
+  if (!editor) return;
+  if (command === 'table') {
+    openTableModal();
+    return;
   }
 
-  const before = textarea.value.slice(0, start);
-  const after = textarea.value.slice(end);
-  textarea.value = `${before}${insert}${after}`;
-  const caret = before.length + insert.length;
-  textarea.focus();
-  textarea.setSelectionRange(caret, caret);
-  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  editor.focus();
+  restoreSelection(editor);
+
+  if (command === 'todo') {
+    document.execCommand(
+      'insertHTML',
+      false,
+      '<ul class="rich-todo"><li><span class="todo-box" contenteditable="false">☐</span> 待办事项</li></ul><p><br></p>'
+    );
+  } else {
+    const commands = {
+      bold: ['bold'],
+      italic: ['italic'],
+      underline: ['underline'],
+      strike: ['strikeThrough'],
+      h2: ['formatBlock', '<h2>'],
+      quote: ['formatBlock', '<blockquote>'],
+      ul: ['insertUnorderedList'],
+      ol: ['insertOrderedList'],
+      hr: ['insertHorizontalRule'],
+    };
+    const entry = commands[command];
+    if (!entry) return;
+    document.execCommand(entry[0], false, entry[1] || null);
+  }
+
+  rememberSelection();
+  notifyEditorChanged();
+  updateTableTools();
 }
 
-/** 编辑 / 预览切换 */
-async function togglePreview() {
-  if (state.editingNoteId) {
-    await saveNoteNow();
-    const id = state.editingNoteId;
-    const isPreview = state.noteMode === 'preview' && state.noteModeId === id;
-    state.noteMode = isPreview ? 'edit' : 'preview';
-    state.noteModeId = isPreview ? null : id;
+function currentTableCell() {
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return null;
+  let node = selection.anchorNode;
+  if (!node) return null;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  return node && node.closest ? node.closest('td, th') : null;
+}
+
+function updateTableTools() {
+  const tools = document.getElementById('table-tools');
+  if (!tools) return;
+  tools.hidden = !currentTableCell();
+}
+
+function tableAddRow() {
+  const cell = currentTableCell();
+  if (!cell) {
+    toast('请先把光标放进表格');
+    return;
   }
-  await render({ scroll: false });
-  if (state.noteMode === 'edit') {
-    const body = document.getElementById('note-body');
-    if (body) setTimeout(() => body.focus({ preventScroll: true }), 60);
+  const row = cell.closest('tr');
+  const newRow = document.createElement('tr');
+  for (let i = 0; i < row.children.length; i += 1) {
+    const td = document.createElement('td');
+    td.innerHTML = '<br>';
+    newRow.appendChild(td);
   }
+  row.after(newRow);
+  placeCaretIn(newRow.firstElementChild);
+  notifyEditorChanged();
+}
+
+function tableAddCol() {
+  const cell = currentTableCell();
+  if (!cell) {
+    toast('请先把光标放进表格');
+    return;
+  }
+  const table = cell.closest('table');
+  const index = Array.from(cell.parentElement.children).indexOf(cell);
+  table.querySelectorAll('tr').forEach((row) => {
+    const td = document.createElement('td');
+    td.innerHTML = '<br>';
+    const reference = row.children[index];
+    if (reference) reference.after(td);
+    else row.appendChild(td);
+  });
+  notifyEditorChanged();
+}
+
+function tableDelete() {
+  const cell = currentTableCell();
+  if (!cell) {
+    toast('请先把光标放进表格');
+    return;
+  }
+  const table = cell.closest('table');
+  const paragraph = document.createElement('p');
+  paragraph.innerHTML = '<br>';
+  table.replaceWith(paragraph);
+  placeCaretIn(paragraph);
+  notifyEditorChanged();
+  updateTableTools();
+}
+
+function openTableModal() {
+  openModal(`
+    <div class="modal-head">
+      <h2>插入表格</h2>
+      <button class="btn tiny" type="button" data-act="close-modal" aria-label="关闭">✕</button>
+    </div>
+    <div class="form">
+      <div class="field-row two">
+        <label class="field"><span>行数</span><input id="tbl-rows" type="number" min="1" max="8" value="3"></label>
+        <label class="field"><span>栏数</span><input id="tbl-cols" type="number" min="1" max="6" value="3"></label>
+      </div>
+      <p class="hint">插入后把光标放进表格，会出现「＋行 / ＋栏 / 删表格」工具。</p>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-act="close-modal">取消</button>
+        <button class="btn btn-primary" type="button" data-act="insert-table">插入</button>
+      </div>
+    </div>`);
+}
+
+function insertTableFromModal(button) {
+  const modal = button.closest('.modal');
+  if (!modal) return;
+  const rows = Math.min(8, Math.max(1, Number(modal.querySelector('#tbl-rows')?.value) || 3));
+  const cols = Math.min(6, Math.max(1, Number(modal.querySelector('#tbl-cols')?.value) || 3));
+  closeTopModal();
+
+  const editor = getNoteEditor();
+  if (!editor) return;
+  editor.focus();
+  restoreSelection(editor);
+
+  let html = '<table><tbody>';
+  for (let r = 0; r < rows; r += 1) {
+    html += '<tr>';
+    for (let c = 0; c < cols; c += 1) html += '<td><br></td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table><p><br></p>';
+  document.execCommand('insertHTML', false, html);
+  rememberSelection();
+  notifyEditorChanged();
+  updateTableTools();
+}
+
+function insertTextIntoNote(text) {
+  const editor = getNoteEditor();
+  if (!editor) return;
+  editor.focus();
+  restoreSelection(editor);
+  document.execCommand('insertText', false, text);
+  rememberSelection();
+  notifyEditorChanged();
 }
 
 /** 语音输入：支援的浏览器直接用 SpeechRecognition；iOS 上提示用系统键盘听写 */
 function dictateNote(button) {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
-    const textarea = document.getElementById('note-body');
-    if (textarea) textarea.focus();
+    const editor = getNoteEditor();
+    if (editor) editor.focus();
     toast('iOS Safari 不开放网页语音识别，请用键盘上的「🎤」系统听写');
     return;
   }
@@ -896,14 +1044,7 @@ function dictateNote(button) {
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
       if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
     }
-    if (!finalText) return;
-    const field = document.getElementById('note-body');
-    if (!field) return;
-    const position = field.selectionStart ?? field.value.length;
-    field.value = `${field.value.slice(0, position)}${finalText}${field.value.slice(position)}`;
-    const caret = position + finalText.length;
-    field.setSelectionRange(caret, caret);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
+    if (finalText) insertTextIntoNote(finalText);
   };
   recognition.onerror = (event) => {
     if (event && event.error && event.error !== 'aborted') toast(`语音识别失败：${event.error}`);
@@ -954,15 +1095,20 @@ async function saveNoteNow() {
   if (!note) return;
 
   const titleEl = document.getElementById('note-title');
-  const bodyEl = document.getElementById('note-body');
+  const editor = getNoteEditor();
   let changed = false;
   if (titleEl && note.title !== titleEl.value) {
     note.title = titleEl.value;
     changed = true;
   }
-  if (bodyEl && note.body !== bodyEl.value) {
-    note.body = bodyEl.value;
-    changed = true;
+  if (editor) {
+    const html = sanitizeHtml(editor.innerHTML);
+    const text = htmlToText(html);
+    if (note.html !== html || note.body !== text) {
+      note.html = html;
+      note.body = text;
+      changed = true;
+    }
   }
   if (!changed) {
     setSaveState('✓ 已储存');
@@ -987,6 +1133,7 @@ async function createNote(taskId) {
     taskId: taskId || null,
     title: '',
     body: '',
+    html: '',
     pinned: 0,
     createdAt: now,
     updatedAt: now,
@@ -1701,8 +1848,15 @@ function openSettings() {
 
     <section class="set-block">
       <h3>应用</h3>
-      <p class="hint">Pixel Notes v1.1 · 离线优先，不需要网络。</p>
+      <p class="hint">Pixel Notes v1.2 · 离线优先，不需要网络。</p>
       <button class="btn" type="button" data-act="force-update">检查更新（清除快取）</button>
+    </section>
+
+    <section class="set-block">
+      <h3>部署检查</h3>
+      <p class="hint">品牌图示或主画面图标不见，通常是部署时漏传了 <code>icons/</code> 资料夹。点一下检查所有档案是否都在。</p>
+      <button class="btn" type="button" data-act="check-assets">检查档案</button>
+      <div id="asset-check" class="asset-list"></div>
     </section>
 
     <section class="set-block danger">
@@ -1760,6 +1914,49 @@ async function copyTodayList() {
 
 async function copyShortcut() {
   await copyText(shortcutUrl(), '已复制捷径链接');
+}
+
+/* ---------- 部署检查 ---------- */
+
+const DEPLOY_FILES = [
+  './index.html',
+  './styles.css',
+  './app.js',
+  './db.js',
+  './util.js',
+  './ics.js',
+  './md.js',
+  './richtext.js',
+  './sw.js',
+  './manifest.webmanifest',
+  './icons/icon-180.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/mark.svg',
+];
+
+async function checkAssets() {
+  const box = document.getElementById('asset-check');
+  if (!box) return;
+  box.innerHTML = '<p class="hint">检查中…</p>';
+
+  const rows = [];
+  for (const url of DEPLOY_FILES) {
+    let ok = false;
+    try {
+      const response = await fetch(`${url}?check=${Date.now()}`, { cache: 'no-store' });
+      ok = response.ok;
+    } catch (err) {
+      ok = false;
+    }
+    rows.push(`<div class="asset-row ${ok ? 'ok' : 'bad'}">${ok ? '✅' : '❌'} <code>${esc(url)}</code></div>`);
+  }
+  const missing = rows.filter((row) => row.includes('bad')).length;
+  box.innerHTML =
+    rows.join('') +
+    `<p class="hint" style="margin-top:8px">${
+      missing ? `有 ${missing} 个档案没找到，请重新上传完整的资料夹。` : '全部档案都在 ✓'
+    }</p>`;
 }
 
 /* ---------- 导出到系统日历 ---------- */
@@ -1984,6 +2181,20 @@ function bindEvents() {
 
   document.addEventListener('click', (event) => {
     if (!(event.target instanceof Element)) return;
+
+    // 笔记里的待办方块：点一下切换 ☐ / ☑
+    const todoBox = event.target.closest('.todo-box');
+    const editor = getNoteEditor();
+    if (todoBox && editor && editor.contains(todoBox)) {
+      event.preventDefault();
+      const checked = todoBox.textContent.trim() === '☑';
+      todoBox.textContent = checked ? '☐' : '☑';
+      const item = todoBox.closest('li');
+      if (item) item.classList.toggle('done', !checked);
+      notifyEditorChanged();
+      return;
+    }
+
     const target = event.target.closest('[data-act]');
     if (!target) return;
     if (target.tagName === 'A' && !target.dataset.act) return;
@@ -1992,6 +2203,11 @@ function bindEvents() {
       console.error(err);
       toast('操作失败：' + err.message);
     });
+  });
+
+  document.addEventListener('selectionchange', () => {
+    rememberSelection();
+    updateTableTools();
   });
 
   document.addEventListener('input', (event) => {
@@ -2004,6 +2220,7 @@ function bindEvents() {
       updateNoteList();
     } else if (el.id === 'note-title' || el.id === 'note-body') {
       scheduleNoteSave();
+      if (el.id === 'note-body') updateTableTools();
     }
   });
 
@@ -2124,11 +2341,20 @@ async function onAction(action, el) {
       toast(`主题：${THEME_LABEL[mode]}`);
       return;
     }
-    case 'md-insert':
-      mdInsert(el.dataset.md || 'bold');
+    case 'rich':
+      richCommand(el.dataset.cmd || 'bold');
       return;
-    case 'toggle-preview':
-      await togglePreview();
+    case 'insert-table':
+      insertTableFromModal(el);
+      return;
+    case 'table-add-row':
+      tableAddRow();
+      return;
+    case 'table-add-col':
+      tableAddCol();
+      return;
+    case 'table-del':
+      tableDelete();
       return;
     case 'dictate-note':
       dictateNote(el);
@@ -2138,6 +2364,9 @@ async function onAction(action, el) {
       return;
     case 'copy-today':
       await copyTodayList();
+      return;
+    case 'check-assets':
+      await checkAssets();
       return;
     case 'delete-task':
       await deleteTaskFlow(id);
