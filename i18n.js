@@ -22,6 +22,7 @@ const HK_PHRASES = [
   ['支持', '支援'], ['鼠标', '滑鼠'], ['屏幕', '螢幕'], ['标签', '標籤'], ['计划', '計劃'],
   ['打印', '列印'], ['后台', '後台'], ['关系', '關係'], ['这里', '這裡'], ['里面', '裡面'],
   ['哪里', '哪裡'], ['台', '臺'], ['裏', '裡'],
+  ['周末', '週末'], ['本周', '本週'], ['下周', '下週'], ['上周', '上週'], ['这周', '這週'],
 ];
 
 const HANT_PAIRS = (
@@ -160,6 +161,21 @@ const EN = {
   '✓ 已获得持久化储存': '✓ Persistent storage granted',
   '取消置顶': 'Unpin', '还没有笔记': 'No notes yet', '去处理': 'Review',
   '封存专案': 'Archive project', '取消封存专案': 'Unarchive project',
+  'iOS 不允许用网址直接打开主画面上的 App：快捷指令的「打开网址」一定会在 Safari 开一个新页面，而 Safari 和主画面 App 的储存是分开的，所以在那边新增的任务不会出现在这里。':
+    'iOS does not let a URL open the Home Screen app: a Shortcuts “Open URL” action always opens a new Safari page, and Safari and the Home Screen app have separate storage — tasks created there will not appear here.',
+  '建议改用剪贴板：在快捷指令用「拷贝到剪贴板」，第一行放任务标题，第二行可选放日期时间（例如 ':
+    'Use the clipboard instead: in Shortcuts, run “Copy to Clipboard” with the task title on the first line and an optional date/time on the second (for example ',
+  '建议改用剪贴板：在快捷指令用「拷贝到剪贴板」，第一行放任务标题，第二行可选放日期时间（例如':
+    'Use the clipboard instead: in Shortcuts, run “Copy to Clipboard” with the task title on the first line and an optional date/time on the second (for example ',
+  'Pixel Notes v1.6 · 离线优先，不需要网络。': 'Pixel Notes v1.6 · offline-first, no network needed.',
+  '），然后回到 App 按下面按钮。': '), then come back to the app and tap the button below.',
+  '📋 从剪贴板新增任务': '📋 Add task from clipboard',
+  '进阶：在 Safari 内用网址预填（只会在 Safari 生效）': 'Advanced: URL prefill inside Safari (Safari only)',
+  '无法读取剪贴板；请允许剪贴板权限，或手动贴上。': 'Could not read the clipboard. Allow clipboard access, or paste manually.',
+  '剪贴板是空的': 'The clipboard is empty',
+  '已复制': 'Copied', '清除并重载': 'Clear & reload', '检查更新': 'Check for updates',
+  '会清除本机快取并重新载入。资料不受影响，但需要连线才能抓到新版本。': 'This clears the local cache and reloads. Your data is safe, but you need to be online to get the new version.',
+  '更新失败：': 'Update failed: ',
 };
 
 export function translateText(text) {

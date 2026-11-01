@@ -1,8 +1,8 @@
-// sw.js — 离线快取
-// 更新版本时请把 CACHE 改成新名字（例如 pixel-notes-v2），
-// 否则旧的快取会继续被使用。也可以在 App 的「设置 → 检查更新」手动清快取。
+// sw.js — 离线快取（v7：导航与程式码改為「网路优先」，避免更新后仍拿到旧版）
+// 更新版本时把 CACHE 改成新名字；旧快取会在 activate 时删掉。
+// 也可以在 App 的「设置 → 检查更新」手动清快取。
 
-const CACHE = 'pixel-notes-v6';
+const CACHE = 'pixel-notes-v7';
 
 const ASSETS = [
   './',
@@ -44,6 +44,25 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+async function networkFirst(request, fallbackUrl) {
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      const copy = response.clone();
+      caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
+    }
+    return response;
+  } catch (err) {
+    const cached = await caches.match(request, { ignoreSearch: true });
+    if (cached) return cached;
+    if (fallbackUrl) {
+      const fallback = await caches.match(fallbackUrl, { ignoreSearch: true });
+      if (fallback) return fallback;
+    }
+    throw err;
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -52,24 +71,12 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(
-      caches.match('./index.html').then((cached) => cached || fetch(request))
-    );
+    event.respondWith(networkFirst(request, './index.html'));
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
-  );
+  // preflight / 带参数的请求不写进快取，避免污染离线包
+  if (url.search) return;
+
+  event.respondWith(networkFirst(request));
 });

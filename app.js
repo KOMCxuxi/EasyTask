@@ -1,4 +1,4 @@
-// app.js — Pixel Notes 前端主程序
+﻿// app.js — Pixel Notes 前端主程序
 // 纯前端、离线优先：资料全部存在 IndexedDB，附件存 blob，不需要任何伺服器。
 
 import { db } from './db.js';
@@ -220,6 +220,7 @@ async function boot() {
     await db.init();
     await seedIfNeeded();
     await loadData();
+    if (await migrateDemoData()) await loadData();
     state.hintDismissed = Boolean(await db.metaGet('installHintDismissed'));
     state.viewMonth = new Date(state.selectedDay.getFullYear(), state.selectedDay.getMonth(), 1);
   } catch (err) {
@@ -330,6 +331,105 @@ async function seedIfNeeded() {
   for (const task of [t1, t2, t3, t4]) await db.taskPut(task);
   for (const note of [n1, n2, n3]) await db.notePut(note);
   await db.metaSet('seeded', true);
+}
+
+/* 旧版（v1.4 以前）的示范资料是简体中文。升级后依目前语言转一次：
+   - English：换成英文示范内容
+   - 繁體中文：转成香港繁體
+   只比对「内建示范资料」的原文，使用者自己输入的内容不会被碰。 */
+const DEMO_PROJECT_EN = { '工作': 'Work', '生活': 'Home', '学习': 'Study' };
+const DEMO_FOLDER_EN = { '灵感': 'Ideas', '工作笔记': 'Work notes' };
+const DEMO_TASK_EN = {
+  '欢迎使用：点开这个任务': 'Welcome: open this task',
+  '整理这周的待办': 'Tidy this week’s tasks',
+  '周末采购清单': 'Weekend shopping list',
+  '读 30 分钟书': 'Read for 30 minutes',
+};
+const DEMO_NOTE_EN = {
+  '这个任务里的笔记': {
+    title: 'Note inside this task',
+    body: 'Every task can have its own notes and attachments.\n\nTap “+ Task note” to add another note, or “+ Attachments” to attach files.\nEverything stays on this device — remember to export a backup now and then.',
+  },
+  '灵感速记': {
+    title: 'Quick ideas',
+    body: 'Standalone notes live here:\n- Books to read\n- Things to buy\n- A sentence to remember',
+  },
+  '本周复盘': {
+    title: 'Weekly review',
+    body: '# Weekly review\n\nWrite down three things that went well, then two to improve.\n\n| Item | Status | Notes |\n| --- | --- | --- |\n| Project A | In progress | Check next Wednesday |\n| Project B | Done | Archive it |',
+  },
+};
+
+const DEMO_PROJECT_ZH = { '工作': '工作', '生活': '生活', '学习': '學習' };
+const DEMO_FOLDER_ZH = { '灵感': '靈感', '工作笔记': '工作筆記' };
+const DEMO_TASK_ZH = {
+  '欢迎使用：点开这个任务': '歡迎使用：點開這個任務',
+  '整理这周的待办': '整理這週的待辦',
+  '周末采购清单': '週末採購清單',
+  '读 30 分钟书': '讀 30 分鐘書',
+};
+const DEMO_NOTE_ZH = {
+  '这个任务里的笔记': {
+    title: '這個任務裡的筆記',
+    body: '每個任務都能有自己的筆記和附件。\n\n點「＋ 任務筆記」再寫一則；點「＋ 附件」把照片或檔案放進來。\n資料只存在這台裝置，記得偶爾到設定裡匯出備份。',
+  },
+  '灵感速记': {
+    title: '靈感速記',
+    body: '獨立備忘錄放在這裡：\n- 想看的書\n- 想買的東西\n- 隨手記下的一句話',
+  },
+  '本周复盘': {
+    title: '本週復盤',
+    body: '# 本週復盤\n\n先寫下三件做得好的事，再寫兩件想改進的事。\n\n| 項目 | 狀況 | 備註 |\n| --- | --- | --- |\n| 專案 A | 進行中 | 下週三檢查 |\n| 專案 B | 已完成 | 待歸檔 |',
+  },
+};
+
+const DEMO_BODY_OLD = {
+  '这个任务里的笔记': '每个任务都能有自己的笔记和附件。\n\n点「＋ 任务笔记」再写一则；点「＋ 附件」把照片或文件放进来。\n资料只存在这台装置，记得偶尔到设置里汇出备份。',
+  '灵感速记': '独立备忘录放在这里：\n- 想看的书\n- 想买的东西\n- 随手记下的一句话',
+  '本周复盘': '# 本周复盘\n\n先写下三件做得好的事，再写两件想改进的事。\n\n| 项目 | 状况 | 备注 |\n| --- | --- | --- |\n| 专案 A | 进行中 | 下周三检查 |\n| 专案 B | 已完成 | 待归档 |',
+};
+
+async function migrateDemoData() {
+  const lang = isZh() ? 'zh-Hant' : 'en';
+  if ((await db.metaGet('demoLangMigrated')) === lang) return false;
+  let changed = false;
+  try {
+    for (const project of await db.projectsAll()) {
+      if (!DEMO_PROJECT_EN[project.name]) continue;
+      project.name = lang === 'zh-Hant' ? DEMO_PROJECT_ZH[project.name] : DEMO_PROJECT_EN[project.name];
+      project.updatedAt = Date.now();
+      await db.projectPut(project);
+      changed = true;
+    }
+    for (const folder of await db.foldersAll()) {
+      if (!DEMO_FOLDER_EN[folder.name]) continue;
+      folder.name = lang === 'zh-Hant' ? DEMO_FOLDER_ZH[folder.name] : DEMO_FOLDER_EN[folder.name];
+      folder.updatedAt = Date.now();
+      await db.folderPut(folder);
+      changed = true;
+    }
+    for (const task of await db.tasksAll()) {
+      if (!DEMO_TASK_EN[task.title]) continue;
+      task.title = lang === 'zh-Hant' ? DEMO_TASK_ZH[task.title] : DEMO_TASK_EN[task.title];
+      task.updatedAt = Date.now();
+      await db.taskPut(task);
+      changed = true;
+    }
+    for (const note of await db.notesAll()) {
+      const match = lang === 'zh-Hant' ? DEMO_NOTE_ZH[note.title] : DEMO_NOTE_EN[note.title];
+      if (!match) continue;
+      // 只有内建原文才换内容；使用者改过的笔记保留原内容
+      if ((note.body || '') === DEMO_BODY_OLD[note.title]) note.body = match.body;
+      note.title = match.title;
+      note.updatedAt = Date.now();
+      await db.notePut(note);
+      changed = true;
+    }
+    await db.metaSet('demoLangMigrated', lang);
+  } catch (err) {
+    console.warn('demo migration failed', err);
+  }
+  return changed;
 }
 
 /* ==========================================================================
@@ -2734,17 +2834,22 @@ function openSettings() {
 
     <section class="set-block">
       <h3>iOS 捷径</h3>
-      <p class="hint">在「快捷指令」里用「打开网址」呼叫下面的链接，就能快速新建任务（可预填标题、日期、开始时间、分类）。</p>
-      <p class="shortcut-url" id="shortcut-url">${esc(shortcutUrl())}</p>
-      <div class="row-btns">
-        <button class="btn" type="button" data-act="copy-shortcut-url">复制链接</button>
-      </div>
-      <p class="hint" style="margin-top:8px">参数：<code>title</code>、<code>date</code>（YYYY-MM-DD）、<code>start</code>、<code>end</code>、<code>cat</code>（work/life/study/other）、<code>remind</code>（分钟，或 <code>none</code>）。</p>
+      <p class="hint">iOS 不允许用网址直接打开主画面上的 App：快捷指令的「打开网址」一定会在 Safari 开一个新页面，而 Safari 和主画面 App 的储存是分开的，所以在那边新增的任务不会出现在这里。</p>
+      <p class="hint">建议改用剪贴板：在快捷指令用「拷贝到剪贴板」，第一行放任务标题，第二行可选放日期时间（例如 <code>2026-11-01 09:00</code>），然后回到 App 按下面按钮。</p>
+      <button class="btn" type="button" data-act="clipboard-task">📋 从剪贴板新增任务</button>
+      <details style="margin-top:12px">
+        <summary class="hint">进阶：在 Safari 内用网址预填（只会在 Safari 生效）</summary>
+        <p class="shortcut-url" id="shortcut-url">${esc(shortcutUrl())}</p>
+        <div class="row-btns">
+          <button class="btn" type="button" data-act="copy-shortcut-url">复制链接</button>
+        </div>
+        <p class="hint" style="margin-top:8px">参数：<code>title</code>、<code>date</code>（YYYY-MM-DD）、<code>start</code>、<code>end</code>、<code>cat</code>（work/life/study/other）、<code>remind</code>（分钟，或 <code>none</code>）。</p>
+      </details>
     </section>
 
     <section class="set-block">
       <h3>应用</h3>
-      <p class="hint">Pixel Notes v1.5 · 离线优先，不需要网络。</p>
+      <p class="hint">Pixel Notes v1.6 · 离线优先，不需要网络。</p>
       <button class="btn" type="button" data-act="force-update">检查更新（清除快取）</button>
     </section>
 
@@ -2810,6 +2915,32 @@ async function copyTodayList() {
 
 async function copyShortcut() {
   await copyText(shortcutUrl(), '已复制捷径链接');
+}
+
+async function quickAddFromClipboard() {
+  let text = '';
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (err) {
+    toast('无法读取剪贴板；请允许剪贴板权限，或手动贴上。');
+    return;
+  }
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    toast('剪贴板是空的');
+    return;
+  }
+  const preset = { title: lines[0].slice(0, 200) };
+  const when = lines[1] && lines[1].match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2})/);
+  if (when) {
+    preset.dateStr = when[1];
+    preset.startTime = when[2];
+  }
+  closeTopModal();
+  openTaskModal(null, preset);
 }
 
 /* ---------- 部署检查 ---------- */
@@ -3066,7 +3197,7 @@ async function forceUpdate() {
     await Promise.all(registrations.map((reg) => reg.unregister()));
     const keys = await caches.keys();
     await Promise.all(keys.map((key) => caches.delete(key)));
-    location.reload();
+    location.replace(`./?fresh=${Date.now()}${location.hash}`);
   } catch (err) {
     toast('更新失败：' + err.message);
   }
@@ -3377,7 +3508,8 @@ async function onAction(action, el) {
       setLang(el.dataset.lang);
       applyLangMeta();
       closeTopModal();
-      render({ scroll: false });
+      if (await migrateDemoData()) await loadData();
+      await render({ scroll: false });
       toast(tl('语言已切换'));
       return;
     }
@@ -3401,6 +3533,9 @@ async function onAction(action, el) {
       return;
     case 'copy-shortcut-url':
       await copyShortcut();
+      return;
+    case 'clipboard-task':
+      await quickAddFromClipboard();
       return;
     case 'copy-today':
       await copyTodayList();
@@ -3517,9 +3652,12 @@ function toast(message) {
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(location.hostname)) return;
-  navigator.serviceWorker.register('./sw.js').catch((err) => {
-    console.warn('Service Worker 注册失败：', err);
-  });
+  navigator.serviceWorker
+    .register('./sw.js')
+    .then((reg) => reg.update().catch(() => {}))
+    .catch((err) => {
+      console.warn('Service Worker 注册失败：', err);
+    });
 }
 
 boot();
