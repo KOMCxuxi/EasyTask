@@ -1,8 +1,8 @@
-// sw.js — 离线快取（v7：导航与程式码改為「网路优先」，避免更新后仍拿到旧版）
+﻿// sw.js — 离线快取（v7：导航与程式码改為「网路优先」，避免更新后仍拿到旧版）
 // 更新版本时把 CACHE 改成新名字；旧快取会在 activate 时删掉。
 // 也可以在 App 的「设置 → 检查更新」手动清快取。
 
-const CACHE = 'pixel-notes-v9';
+const CACHE = 'pixel-notes-v10';
 
 const ASSETS = [
   './',

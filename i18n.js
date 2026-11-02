@@ -1,4 +1,4 @@
-// i18n.js — 介面語言：English（預設）/ 香港繁體中文
+﻿// i18n.js — 介面語言：English（預設）/ 香港繁體中文
 // 程式碼保留中文原文，渲染後由 translateDom() 換成目標語言；使用者內容用 data-raw 標記。
 export const LANGS = [['en', 'English'], ['zh-Hant', '繁體中文']];
 const LANG_KEY = 'pixel-notes-lang';
@@ -167,7 +167,8 @@ const EN = {
     'Use the clipboard instead: in Shortcuts, run “Copy to Clipboard” with the task title on the first line and an optional date/time on the second (for example ',
   '建议改用剪贴板：在快捷指令用「拷贝到剪贴板」，第一行放任务标题，第二行可选放日期时间（例如':
     'Use the clipboard instead: in Shortcuts, run “Copy to Clipboard” with the task title on the first line and an optional date/time on the second (for example ',
-  'Pixel Notes v1.7 · 离线优先，不需要网络。': 'Pixel Notes v1.7 · offline-first, no network needed.',
+  'Pixel Notes v1.8 · 离线优先，不需要网络。': 'Pixel Notes v1.8 · offline-first, no network needed.',
+  'Pixel Notes 备份': 'Pixel Notes backup',
   '），然后回到 App 按下面按钮。': '), then come back to the app and tap the button below.',
   '📋 从剪贴板新增任务': '📋 Add task from clipboard',
   '进阶：在 Safari 内用网址预填（只会在 Safari 生效）': 'Advanced: URL prefill inside Safari (Safari only)',
@@ -195,6 +196,21 @@ const EN = {
     'Browsers may clear website data to free space. Adding to the Home Screen lowers the risk, but the only reliable protection is exporting a backup regularly (see Backup & restore below).',
   '删除线': 'Strikethrough', '缩小': 'Decrease size', '放大': 'Increase size',
   '已用 {used}{quota}': 'Used {used}{quota}',
+  '尝试申请恒久储存': 'Try to request persistent storage',
+  '目前状态：已持久化（浏览器仍可能在空间不足时清理，建议定期备份）':
+    'Status: persistent (the browser may still clear data under storage pressure — keep backups).',
+  '目前状态：未持久化（浏览器可在空间不足时清理，建议定期备份）':
+    'Status: not persistent (the browser may clear data under storage pressure — keep backups).',
+  '申请中…': 'Requesting…',
+  '已获得持久化储存；仍建议定期备份。': 'Persistent storage granted. Regular backups are still recommended.',
+  '浏览器未授予持久化储存。加到主画面可降低风险，但备份才可靠。':
+    'The browser did not grant persistent storage. Adding to the Home Screen lowers the risk, but a backup is the only reliable protection.',
+  '分享备份（Google Drive / 文件）': 'Share backup (Google Drive / Files)',
+  '「分享备份」会打开 iOS 分享面板，选 Google Drive、文件（iCloud）或 OneDrive 即可存到云端；浏览器不支援分享时会自动下载。':
+    '“Share backup” opens the iOS share sheet; choose Google Drive, Files (iCloud) or OneDrive to save it to the cloud. If sharing is unsupported, the backup downloads instead.',
+  '已打开分享面板，选 Google Drive 或文件即可': 'Share sheet opened — choose Google Drive or Files.',
+  '这个浏览器不支援分享，已改为下载备份': 'Sharing is not supported here; the backup was downloaded instead.',
+  '分享失败：': 'Share failed: ',
 };
 
 export function translateText(text) {

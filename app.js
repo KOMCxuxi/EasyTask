@@ -109,6 +109,9 @@ const state = {
   theme: 'auto',
   urls: [],
   hintDismissed: false,
+  backupFile: null,
+  backupAt: 0,
+  backupPreparing: null,
 };
 
 let modalStack = [];
@@ -3072,8 +3075,10 @@ function openSettings() {
     </section>
 
     <section class="set-block">
-      <h3>储存</h3>
+      <h3>储存空间</h3>
       <p class="hint" id="storage-info">读取中…</p>
+      <button class="btn" type="button" data-act="persist-storage">尝试申请恒久储存</button>
+      <p class="hint" id="persist-info" style="margin-top:8px"></p>
       <p class="hint" style="margin-top:8px">浏览器可能为了空间清理网站资料；加到主画面会降低风险，但唯一可靠的做法是定期汇出备份（见下方「备份与还原」）。</p>
     </section>
 
@@ -3091,9 +3096,11 @@ function openSettings() {
       <h3>备份与还原</h3>
       <p class="hint">资料只存在这台装置。换装置或清除浏览器资料前，记得先汇出备份。</p>
       <div class="row-btns">
+        <button class="btn btn-primary" type="button" data-act="share-backup">分享备份（Google Drive / 文件）</button>
         <button class="btn" type="button" data-act="export-backup">汇出备份 JSON</button>
         <button class="btn" type="button" data-act="import-backup">汇入备份</button>
       </div>
+      <p class="hint" style="margin-top:8px">「分享备份」会打开 iOS 分享面板，选 Google Drive、文件（iCloud）或 OneDrive 即可存到云端；浏览器不支援分享时会自动下载。</p>
       <input class="sr-only" type="file" id="import-file" accept=".json,application/json">
     </section>
 
@@ -3114,7 +3121,7 @@ function openSettings() {
 
     <section class="set-block">
       <h3>应用</h3>
-      <p class="hint">Pixel Notes v1.7 · 离线优先，不需要网络。</p>
+      <p class="hint">Pixel Notes v1.8 · 离线优先，不需要网络。</p>
       <button class="btn" type="button" data-act="force-update">检查更新（清除快取）</button>
     </section>
 
@@ -3133,6 +3140,8 @@ function openSettings() {
   `);
 
   fillStorageInfo();
+  updatePersistStatus();
+  prepareBackupFile().catch(() => {});
   const importInput = m.el.querySelector('#import-file');
   if (importInput) importInput.addEventListener('change', handleImportFile);
 }
@@ -3323,29 +3332,112 @@ function base64ToBlob(base64, type) {
   return new Blob([bytes], { type: type || 'application/octet-stream' });
 }
 
+async function buildBackupFile() {
+  const payload = {
+    app: 'pixel-notes',
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    tasks: state.tasks,
+    notes: state.notes,
+    projects: state.projects,
+    folders: state.folders,
+    files: [],
+  };
+  for (const meta of state.files) {
+    const blob = await db.blobGet(meta.id);
+    payload.files.push({ meta, data: blob ? await blobToBase64(blob) : null });
+  }
+  const now = new Date();
+  const name = `pixel-notes-backup-${toDateValue(now.getTime()).replace(/-/g, '')}-${pad2(now.getHours())}${pad2(now.getMinutes())}.json`;
+  return new File([JSON.stringify(payload)], name, { type: 'application/json' });
+}
+
 async function exportBackup() {
   try {
-    const payload = {
-      app: 'pixel-notes',
-      version: 2,
-      exportedAt: new Date().toISOString(),
-      tasks: state.tasks,
-      notes: state.notes,
-      projects: state.projects,
-      folders: state.folders,
-      files: [],
-    };
-    for (const meta of state.files) {
-      const blob = await db.blobGet(meta.id);
-      payload.files.push({ meta, data: blob ? await blobToBase64(blob) : null });
-    }
-    const now = new Date();
-    const name = `pixel-notes-backup-${toDateValue(now.getTime()).replace(/-/g, '')}-${pad2(now.getHours())}${pad2(now.getMinutes())}.json`;
-    downloadBlob(new Blob([JSON.stringify(payload)], { type: 'application/json' }), name);
+    const file = await buildBackupFile();
+    downloadBlob(file, file.name);
     toast('已汇出备份');
   } catch (err) {
     console.error(err);
     toast('汇出失败：' + err.message);
+  }
+}
+
+async function prepareBackupFile() {
+  if (state.backupFile && Date.now() - state.backupAt < 120000) return state.backupFile;
+  if (state.backupPreparing) return state.backupPreparing;
+  state.backupPreparing = buildBackupFile()
+    .then((file) => {
+      state.backupFile = file;
+      state.backupAt = Date.now();
+      return file;
+    })
+    .finally(() => {
+      state.backupPreparing = null;
+    });
+  return state.backupPreparing;
+}
+
+async function shareBackup() {
+  try {
+    const file =
+      state.backupFile && Date.now() - state.backupAt < 120000
+        ? state.backupFile
+        : await prepareBackupFile();
+    const canShare = navigator.canShare ? navigator.canShare({ files: [file] }) : Boolean(navigator.share);
+    if (canShare && navigator.share) {
+      await navigator.share({
+        files: [file],
+        title: tl('Pixel Notes 备份'),
+        text: tl('Pixel Notes 备份'),
+      });
+      toast('已打开分享面板，选 Google Drive 或文件即可');
+    } else {
+      downloadBlob(file, file.name);
+      toast('这个浏览器不支援分享，已改为下载备份');
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    console.error(err);
+    toast('分享失败：' + err.message);
+  }
+}
+
+async function updatePersistStatus() {
+  const el = document.getElementById('persist-info');
+  if (!el) return;
+  if (!navigator.storage || !navigator.storage.persist) {
+    el.textContent = tl('这个浏览器不支援持久化储存。');
+    return;
+  }
+  let persisted = false;
+  try {
+    if (navigator.storage.persisted) persisted = await navigator.storage.persisted();
+  } catch (err) {
+    /* ignore */
+  }
+  el.textContent = persisted
+    ? tl('目前状态：已持久化（浏览器仍可能在空间不足时清理，建议定期备份）')
+    : tl('目前状态：未持久化（浏览器可在空间不足时清理，建议定期备份）');
+}
+
+async function requestPersist() {
+  const el = document.getElementById('persist-info');
+  if (!navigator.storage || !navigator.storage.persist) {
+    if (el) el.textContent = tl('这个浏览器不支援持久化储存。');
+    return;
+  }
+  if (el) el.textContent = tl('申请中…');
+  try {
+    const ok = await navigator.storage.persist();
+    if (el) {
+      el.textContent = ok
+        ? tl('已获得持久化储存；仍建议定期备份。')
+        : tl('浏览器未授予持久化储存。加到主画面可降低风险，但备份才可靠。');
+    }
+    toast(ok ? tl('已获得持久化储存') : tl('未授予持久化储存'));
+  } catch (err) {
+    if (el) el.textContent = tl('申请失败：{msg}', { msg: err.message });
   }
 }
 
@@ -3909,6 +4001,12 @@ async function onAction(action, el) {
       return;
     case 'export-backup':
       await exportBackup();
+      return;
+    case 'share-backup':
+      await shareBackup();
+      return;
+    case 'persist-storage':
+      await requestPersist();
       return;
     case 'import-backup': {
       const input = document.getElementById('import-file');
